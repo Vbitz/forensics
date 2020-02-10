@@ -1,0 +1,18 @@
+{
+  "name": "forensics",
+  "devDependencies": {
+    "@types/node": "^10.0.3",
+    "gts": "^1.1.2",
+    "typescript": "~3.7.0"
+  },
+  "scripts": {
+    "start": "yarn run compile && node build/src",
+    "check": "gts check",
+    "clean": "gts clean",
+    "compile": "tsc -p .",
+    "fix": "gts fix",
+    "prepare": "yarn run compile",
+    "pretest": "yarn run compile",
+    "posttest": "yarn run check"
+  }
+}
