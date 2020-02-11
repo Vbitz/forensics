@@ -35,6 +35,8 @@ interface BootSectorHeader {
 }
 
 interface MFTAttribute {
+  offset: number;
+
   attributeType: AttributeType;
   recordLength: number;
   nonResidentFlag: number;
@@ -43,7 +45,7 @@ interface MFTAttribute {
   attributeDataFlags: number;
   attributeIdentifer: number;
 
-  name: string;
+  name: string | undefined;
   attributeTypeString: string;
 
   nonResidentData: MFTNonResidentData | undefined;
@@ -93,8 +95,243 @@ enum AttributeType {
   END_OF_ATTRIBUTES = 0xffffffff,
 }
 
+export class MFTEntry {
+  private clusterNumber = 0;
+  private _cluster: BinaryReader | undefined;
+  private mftAttributes: MFTAttribute[] = [];
+
+  private constructor(private owner: NTFS, readonly index: number) {}
+
+  private get cluster() {
+    return this._cluster || expect('Entry not parsed.');
+  }
+
+  static async create(
+    owner: NTFS,
+    index: number,
+    clusterNumber: number,
+    cluster: BinaryReader
+  ) {
+    const newEntry = new MFTEntry(owner, index);
+
+    await newEntry.parse(clusterNumber, cluster);
+
+    return newEntry;
+  }
+
+  async parse(clusterNumber: number, cluster: BinaryReader) {
+    this.clusterNumber = clusterNumber;
+
+    this._cluster = cluster;
+
+    const mftEntryHeader = await this.cluster.struct(async reader => ({
+      signature: reader.assertMagic(toHex('FILE')),
+      fixUpValuesOffset: reader.u16(),
+      fixUpValuesCount: reader.u16(),
+      metadataTransactionJournalSequenceNumber: reader.u64(),
+      sequenceNumber: reader.u16(),
+      referenceLinkCount: reader.u16(),
+      firstAttributesOffset: reader.u16(),
+      entryFlags: reader.u16(),
+      usedEntrySize: reader.u32(),
+      totalEntrySize: reader.u32(),
+      baseRecordFileReference: await this.readFileReference(reader),
+      firstAvailableAttributeIdentifer: reader.u16(),
+      unknown1: reader.read(2),
+      unknown2: reader.read(4),
+      unknown3: reader.read(2),
+      index: reader.u32(),
+    }));
+
+    this.cluster.seek(mftEntryHeader.firstAttributesOffset);
+
+    while (true) {
+      const attribute = await this.readAttribute(this.cluster);
+
+      if (attribute === undefined) {
+        break;
+      }
+
+      this.mftAttributes.push(attribute);
+    }
+  }
+
+  async getFileName() {
+    const fileNameAttribute = await this.readFileNameAttribute();
+
+    if (fileNameAttribute === undefined) {
+      return undefined;
+    }
+
+    return fileNameAttribute.nameString;
+  }
+
+  getAttributeNames() {
+    return this.mftAttributes.map(attr =>
+      attr.name !== undefined ? attr.name : attr.attributeTypeString
+    );
+  }
+
+  private async readFileReference(reader: BinaryReader) {
+    return reader.struct(async reader => ({
+      mftEntryIndex: reader.u32(),
+      unused: reader.read(2),
+      sequenceNumber: reader.u16(),
+    }));
+  }
+
+  private async readFileNameAttribute() {
+    const fileNameAttribute = this.getAttributeByType(AttributeType.FILE_NAME);
+
+    if (fileNameAttribute === undefined) {
+      return undefined;
+    }
+
+    const fileNameData = BinaryReader.create(
+      await this.getAttributeData(fileNameAttribute)
+    );
+
+    const fileNameStructure = await fileNameData.struct(async reader => ({
+      parentFileReference: reader.u64(),
+      creationDateTime: reader.u64(),
+      lastModificationDateTime: reader.u64(),
+      mftEntryLastModifyDateTime: reader.u64(),
+      lastAccessDateTime: reader.u64(),
+      allocatedFileSize: reader.u64(),
+      fileSize: reader.u64(),
+      fileAttributeFlags: reader.u32(),
+      extendedData: reader.u32(),
+      nameStringSize: reader.u8(),
+      nameNamespace: reader.u8(),
+      nameString: '',
+    }));
+
+    fileNameStructure.nameString = fileNameData.utf16le(
+      fileNameStructure.nameStringSize * 2
+    );
+
+    return fileNameStructure;
+  }
+
+  async getData(): Promise<Buffer> {
+    const dataAttribute = this.getAttributeByType(AttributeType.DATA);
+
+    if (dataAttribute === undefined) {
+      throw new Error('Not Implemented');
+    }
+
+    const mftData = await this.getAttributeData(dataAttribute);
+
+    return mftData;
+  }
+
+  private async readAttribute(
+    cluster: BinaryReader
+  ): Promise<MFTAttribute | undefined> {
+    if (
+      (await cluster.peek(async reader => reader.u32())) ===
+      AttributeType.END_OF_ATTRIBUTES
+    ) {
+      return undefined;
+    }
+
+    const attribute = await cluster.peek(async cluster => {
+      const offset = cluster.tell();
+
+      const values: MFTAttribute = await cluster.struct(async reader => ({
+        offset,
+        attributeType: reader.u32(),
+        attributeTypeString: '',
+        recordLength: reader.u32(),
+        nonResidentFlag: reader.u8(),
+        nameLength: reader.u8(),
+        nameOffset: reader.u16(),
+        attributeDataFlags: reader.u16(),
+        attributeIdentifer: reader.u16(),
+        name: undefined,
+        nonResidentData: undefined,
+        residentData: undefined,
+      }));
+
+      values.attributeTypeString = AttributeType[values.attributeType];
+
+      values.name = await cluster.seekTemp(
+        offset + values.nameOffset,
+        async reader => {
+          return reader.utf16le(values.nameLength);
+        }
+      );
+
+      if (values.name.length === 0) {
+        values.name = undefined;
+      }
+
+      if (values.nonResidentFlag === 0) {
+        values.residentData = await cluster.struct(async reader => ({
+          dataSize: reader.u32(),
+          dataOffset: reader.u16(),
+          indexedFlag: reader.u8(),
+          padding: reader.read(1),
+        }));
+      } else if (values.nonResidentFlag === 1) {
+        values.nonResidentData = await cluster.struct(async reader => ({
+          firstVirtualClusterNumber: reader.u64(),
+          lastVirtualClusterNumber: reader.u64(),
+          dataRunsOffset: reader.u16(),
+          compressionUnitSize: reader.u16(),
+          padding: reader.read(4),
+          allocatedDataLength: reader.u64(),
+          dataSize: reader.u64(),
+          validDataSize: reader.u64(),
+
+          totalAllocatedSize: undefined,
+        }));
+
+        if (values.nonResidentData.compressionUnitSize > 0) {
+          values.nonResidentData.totalAllocatedSize = cluster.u64();
+        }
+      }
+
+      return values;
+    });
+
+    cluster.seek(cluster.tell() + attribute.recordLength);
+
+    return attribute;
+  }
+
+  private async getAttributeData(attr: MFTAttribute): Promise<Buffer> {
+    if (attr.nonResidentData !== undefined) {
+      const clusters: Buffer[] = [];
+
+      for (
+        let i = attr.nonResidentData.firstVirtualClusterNumber;
+        i < attr.nonResidentData.lastVirtualClusterNumber;
+        i++
+      ) {
+        clusters.push(await this.owner.readClusters(this.clusterNumber + i));
+      }
+
+      return Buffer.concat(clusters);
+    } else if (attr.residentData !== undefined) {
+      return this.cluster.seekTemp(
+        attr.offset + attr.residentData.dataOffset,
+        async reader => reader.read(attr.residentData!.dataSize)
+      );
+    } else {
+      throw new Error('Not Implemented');
+    }
+  }
+
+  private getAttributeByType(type: AttributeType) {
+    return this.mftAttributes.find(attr => attr.attributeType === type);
+  }
+}
+
 export class NTFS {
   private _bootSectorHeader: BootSectorHeader | undefined = undefined;
+
+  private mftEntries: MFTEntry[] = [];
 
   private constructor(private file: File) {}
 
@@ -113,46 +350,24 @@ export class NTFS {
   private async parse() {
     await this.readBootSector();
 
+    const mftClusterNumber = this.bootSectorHeader.mftClusterNumber;
+
     const mftCluster = BinaryReader.create(
-      await this.readCluster(this.bootSectorHeader.mftClusterNumber)
+      await this.readClusters(mftClusterNumber)
     );
 
-    await promises.writeFile('mftCluster.bin', mftCluster.buffer);
+    const mftEntry = await MFTEntry.create(
+      this,
+      0,
+      mftClusterNumber,
+      mftCluster
+    );
 
-    const mftEntryHeader = await mftCluster.struct(async reader => ({
-      signature: reader.assertMagic(toHex('FILE')),
-      fixUpValuesOffset: reader.u16(),
-      fixUpValuesCount: reader.u16(),
-      metadataTransactionJournalSequenceNumber: reader.u64(),
-      sequenceNumber: reader.u16(),
-      referenceLinkCount: reader.u16(),
-      firstAttributesOffset: reader.u16(),
-      entryFlags: reader.u16(),
-      usedEntrySize: reader.u32(),
-      totalEntrySize: reader.u32(),
-      baseRecordFileReference: reader.u64(),
-      firstAvailableAttributeIdentifer: reader.u16(),
-      unknown1: reader.read(2),
-      unknown2: reader.read(4),
-      unknown3: reader.read(2),
-      index: reader.u32(),
-    }));
+    const mftData = BinaryReader.create(await mftEntry.getData());
 
-    mftCluster.seek(mftEntryHeader.firstAttributesOffset);
+    await promises.writeFile('mft.bin', mftData.buffer);
 
-    const mftAttributes: MFTAttribute[] = [];
-
-    while (true) {
-      const attribute = await this.readMFTAttribute(mftCluster);
-
-      if (attribute === undefined) {
-        break;
-      }
-
-      mftAttributes.push(attribute);
-    }
-
-    console.log(mftAttributes);
+    await this.readMFT(mftClusterNumber, mftData);
 
     // console.log(mftCluster);
   }
@@ -191,76 +406,54 @@ export class NTFS {
     }));
   }
 
-  private async readCluster(index: number) {
-    const clusterSize =
-      this.bootSectorHeader.bytesPerSector *
-      this.bootSectorHeader.sectorsPerCluster;
-    return this.file.readAbsolute(index * clusterSize, clusterSize);
-  }
+  async readClusters(index: number, count = 1) {
+    if (count === 1) {
+      const clusterSize =
+        this.bootSectorHeader.bytesPerSector *
+        this.bootSectorHeader.sectorsPerCluster;
 
-  private async readMFTAttribute(
-    cluster: BinaryReader
-  ): Promise<MFTAttribute | undefined> {
-    if (
-      (await cluster.peek(async reader => reader.u32())) ===
-      AttributeType.END_OF_ATTRIBUTES
-    ) {
-      return undefined;
-    }
+      return this.file.readAbsolute(index * clusterSize, clusterSize);
+    } else {
+      const clusters: Buffer[] = [];
 
-    const attribute = await cluster.peek(async cluster => {
-      const values: MFTAttribute = await cluster.struct(async reader => ({
-        attributeType: reader.u32(),
-        attributeTypeString: '',
-        recordLength: reader.u32(),
-        nonResidentFlag: reader.u8(),
-        nameLength: reader.u8(),
-        nameOffset: reader.u16(),
-        attributeDataFlags: reader.u16(),
-        attributeIdentifer: reader.u16(),
-        name: '',
-        nonResidentData: undefined,
-        residentData: undefined,
-      }));
-
-      values.attributeTypeString = AttributeType[values.attributeType];
-
-      values.name = await cluster.seekTemp(values.nameOffset, async reader => {
-        return reader.utf16le(values.nameLength);
-      });
-
-      if (values.nonResidentFlag === 0) {
-        values.residentData = await cluster.struct(async reader => ({
-          dataSize: reader.u32(),
-          dataOffset: reader.u16(),
-          indexedFlag: reader.u8(),
-          padding: reader.read(1),
-        }));
-      } else if (values.nonResidentFlag === 1) {
-        values.nonResidentData = await cluster.struct(async reader => ({
-          firstVirtualClusterNumber: reader.u64(),
-          lastVirtualClusterNumber: reader.u64(),
-          dataRunsOffset: reader.u16(),
-          compressionUnitSize: reader.u16(),
-          padding: reader.read(4),
-          allocatedDataLength: reader.u64(),
-          dataSize: reader.u64(),
-          validDataSize: reader.u64(),
-
-          totalAllocatedSize: undefined,
-        }));
-
-        if (values.nonResidentData.compressionUnitSize > 0) {
-          values.nonResidentData.totalAllocatedSize = cluster.u64();
-        }
+      for (let i = 0; i < count; i++) {
+        clusters.push(await this.readClusters(index + i));
       }
 
-      return values;
-    });
+      return Buffer.concat(clusters);
+    }
+  }
 
-    cluster.seek(cluster.tell() + attribute.recordLength);
+  private async readMFT(mftBaseCluster: number, mftData: BinaryReader) {
+    let index = 0;
 
-    return attribute;
+    while (mftData.tell() < mftData.buffer.length) {
+      const entry = BinaryReader.create(mftData.read(1024));
+
+      if ((await entry.peek(async reader => reader.u32())) === 0) {
+        index += 1;
+
+        continue;
+      }
+
+      // TODO(joshua): Calculate correct cluster numbers.
+      const newEntry = await MFTEntry.create(
+        this,
+        index,
+        mftBaseCluster + index * 2,
+        entry
+      );
+
+      console.log(
+        'Entry',
+        await newEntry.getFileName(),
+        newEntry.getAttributeNames()
+      );
+
+      this.mftEntries.push(newEntry);
+
+      index += 1;
+    }
   }
 }
 
