@@ -1,14 +1,17 @@
 import { ewfFileMain } from './ewfFile';
+import { ntfsMain } from './ntfs';
 
 async function main(args: string[]): Promise<number> {
   const [entryPoint, ...rest] = args;
 
-  if (entryPoint !== 'ewf') {
+  if (entryPoint === 'ewf') {
+    return ewfFileMain(rest);
+  } else if (entryPoint === 'ntfs') {
+    return ntfsMain(rest);
+  } else {
     console.error('Invalid EntryPoint');
     return 1;
   }
-
-  return ewfFileMain(rest);
 }
 
 main(process.argv.slice(2))

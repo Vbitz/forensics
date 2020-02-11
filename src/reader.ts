@@ -3,10 +3,38 @@ import * as zlib from 'zlib';
 export class BinaryReader {
   private currentOffset = 0;
 
-  private constructor(private buffer: Buffer) {}
+  private constructor(readonly buffer: Buffer) {}
 
   static create(buff: Buffer): BinaryReader {
     return new BinaryReader(buff);
+  }
+
+  seek(offset: number) {
+    this.currentOffset = offset;
+  }
+
+  async seekTemp<T>(
+    offset: number,
+    cb: (reader: BinaryReader) => Promise<T>
+  ): Promise<T> {
+    return this.peek(async reader => {
+      this.seek(offset);
+      return cb(reader);
+    });
+  }
+
+  async peek<T>(cb: (reader: BinaryReader) => Promise<T>): Promise<T> {
+    const lastOffset = this.tell();
+
+    const ret = await cb(this);
+
+    this.seek(lastOffset);
+
+    return ret;
+  }
+
+  tell(): number {
+    return this.currentOffset;
   }
 
   assertMagic(str: string): string {
@@ -56,6 +84,18 @@ export class BinaryReader {
     return ret;
   }
 
+  utf16le(length: number): string {
+    const ret = this.buffer.toString(
+      'utf16le',
+      this.currentOffset,
+      this.currentOffset + length
+    );
+
+    this.currentOffset += length;
+
+    return ret;
+  }
+
   read(length?: number): Buffer {
     if (length === undefined) {
       return this.buffer;
@@ -73,6 +113,12 @@ export class BinaryReader {
 
   u8() {
     const ret = this.buffer.readUInt8(this.currentOffset);
+    this.currentOffset += 1;
+    return ret;
+  }
+
+  s8() {
+    const ret = this.buffer.readInt8(this.currentOffset);
     this.currentOffset += 1;
     return ret;
   }

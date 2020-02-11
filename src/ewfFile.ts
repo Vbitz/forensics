@@ -1,3 +1,5 @@
+// Documentation from: https://github.com/libyal/libewf/blob/master/documentation/Expert%20Witness%20Compression%20Format%20%28EWF%29.asciidoc#compression
+
 import { File, MemoryFile } from './file';
 import { hexString, zipObject } from './common';
 import { BinaryReader } from './reader';
@@ -5,8 +7,18 @@ import { promises } from 'fs';
 
 const EWF_MAGIC = hexString('45', '56', '46', '09', '0d', '0a', 'ff', '00');
 
-export class EWFFile {
-  private constructor(private file: File) {}
+interface ChunkTableEntry {
+  offset: number;
+  compressed: boolean;
+}
+
+export class EWFFile extends File {
+  private tableEntries: ChunkTableEntry[] = [];
+  private chunkSize = 0;
+
+  private constructor(private file: File) {
+    super();
+  }
 
   static async open(file: File): Promise<EWFFile> {
     const newFile = new EWFFile(file);
@@ -14,6 +26,43 @@ export class EWFFile {
     await newFile.parse();
 
     return newFile;
+  }
+
+  get numberOfChunks() {
+    return this.tableEntries.length;
+  }
+
+  async readChunk(index: number): Promise<Buffer> {
+    const entry = this.tableEntries[index];
+
+    if (entry === undefined) {
+      throw new Error('Not Implemented');
+    }
+
+    const compressedData = await this.file.readAbsolute(
+      entry.offset,
+      this.chunkSize
+    );
+
+    const decompressedData = await BinaryReader.create(
+      compressedData
+    ).inflate();
+
+    return decompressedData;
+  }
+
+  async readAbsolute(offset: number, size: number): Promise<Buffer> {
+    const chunkNumber = Math.floor(offset / this.chunkSize);
+
+    const chunkOffset = offset % this.chunkSize;
+
+    if (chunkOffset + size > this.chunkSize) {
+      throw new Error('Cross chunk reads not implemented');
+    }
+
+    const chunk = await this.readChunk(chunkNumber);
+
+    return chunk.slice(chunkOffset, chunkOffset + size);
   }
 
   private async parse() {
@@ -28,29 +77,46 @@ export class EWFFile {
 
     const sectorsSection = await this.readSectionDescriptor();
 
-    console.log('sectors', sectorsSection);
+    // console.log('sectors', sectorsSection);
 
     if (sectorsSection.type !== 'sectors') {
       throw new Error('Not Implemented');
     }
 
-    const chunkSize = volume.sectorsPerChunk * volume.bytesPerSector;
-
-    console.log(volume.chunkCount);
-
-    const chunkData = await this.file.read(sectorsSection.sectionSize);
-
-    const decompressedChunkData = await BinaryReader.create(
-      chunkData
-    ).inflate();
-
-    await promises.writeFile('firstChunk.bin', decompressedChunkData);
+    this.chunkSize = volume.sectorsPerChunk * volume.bytesPerSector;
 
     this.file.seek(sectorsSection.nextSectionOffset);
 
-    const unknownSection = await this.readSectionDescriptor();
+    const tableSection = await this.readSectionDescriptor();
 
-    console.log(unknownSection);
+    if (tableSection.type !== 'table') {
+      throw new Error('Not Implemented');
+    }
+
+    const tableData = BinaryReader.create(
+      await this.file.read(tableSection.sectionSize)
+    );
+
+    const tableHeader = await tableData.struct(async reader => ({
+      numberOfEntries: reader.u32(),
+      padding1: reader.read(4),
+      tableBaseOffset: reader.u64(),
+      padding2: reader.read(4),
+      checksum: reader.u32(),
+    }));
+
+    for (let i = 0; i < tableHeader.numberOfEntries; i++) {
+      const msb = Math.pow(2, 31);
+      const value = tableData.u32();
+      const offset = value ^ msb;
+
+      this.tableEntries.push({
+        compressed: (value & msb) !== 0,
+        offset: offset + tableHeader.tableBaseOffset,
+      });
+    }
+
+    // console.log(tableSection, tableHeader, tableEntries);
   }
 
   private async readSegmentHeader() {
@@ -221,6 +287,12 @@ export async function ewfFileMain(args: string[]): Promise<number> {
   const file = await MemoryFile.open(fileName);
 
   const ewfFile = await EWFFile.open(file);
+
+  for (let i = 0; i < ewfFile.numberOfChunks; i++) {
+    const chunk = await ewfFile.readChunk(i);
+
+    process.stderr.write('.');
+  }
 
   return 0;
 }
