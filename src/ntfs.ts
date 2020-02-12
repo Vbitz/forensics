@@ -1,4 +1,4 @@
-// Documentation from: https://github.com/libyal/libfsntfs/blob/master/documentation/New%20Technologies%20File%20System%20(NTFS).asciidoc#mft-entry-header
+// Documentation from: https://github.com/libyal/libfsntfs/blob/master/documentation/New%20Technologies%20File%20System%20(NTFS).asciidoc
 
 import { toHex, expect } from './common';
 import { EWFFile } from './ewfFile';
@@ -97,12 +97,73 @@ enum AttributeType {
   END_OF_ATTRIBUTES = 0xffffffff,
 }
 
-export class MFTEntry {
-  private clusterNumber = 0;
+export class NTFSFile extends File {
+  private constructor(
+    private entry: NTFSFileEntry,
+    private dataAttribute: MFTAttribute
+  ) {
+    super();
+  }
+
+  static async open(entry: NTFSFileEntry) {
+    const dataAttribute = entry.getAttributeByType(AttributeType.DATA);
+
+    if (dataAttribute === undefined) {
+      throw new Error('No Data attribute');
+    }
+
+    return new NTFSFile(entry, dataAttribute);
+  }
+
+  async readAbsolute(offset: number, size: number): Promise<Buffer> {
+    const clusterSize = this.entry.owner.clusterSize;
+
+    if (this.dataAttribute.nonResidentData === undefined) {
+      throw new Error('Not Implemented');
+    }
+
+    // if (offset % clusterSize !== 0 || size % clusterSize !== 0) {
+    //   console.log(offset, size, clusterSize);
+    //   throw new Error('Unaligned reads not implemented');
+    // }
+
+    const firstCluster =
+      this.entry.clusterNumber +
+      this.dataAttribute.nonResidentData.firstVirtualClusterNumber +
+      Math.floor(offset / clusterSize);
+
+    const clusterOffset = offset % clusterSize;
+
+    const clusterCount = Math.ceil(size / clusterSize);
+
+    return (await this.readOwnerCluster(firstCluster, clusterCount)).slice(
+      clusterOffset,
+      clusterOffset + size
+    );
+  }
+
+  private async readOwnerCluster(index: number, count = 1) {
+    return this.entry.owner.readClusters(index, count);
+  }
+}
+
+function ntDateTime(reader: BinaryReader): Date {
+  let value = BigInt(reader.u64());
+
+  const adjust = 11644473600000n * 10000n;
+
+  value -= adjust;
+
+  return new Date(Number(value / 10000n));
+}
+
+export class NTFSFileEntry {
+  clusterNumber = 0;
+
   private _cluster: BinaryReader | undefined;
   private mftAttributes: MFTAttribute[] = [];
 
-  private constructor(private owner: NTFS, readonly index: number) {}
+  private constructor(readonly owner: NTFS, readonly index: number) {}
 
   private get cluster() {
     return this._cluster || expect('Entry not parsed.');
@@ -114,7 +175,7 @@ export class MFTEntry {
     clusterNumber: number,
     cluster: BinaryReader
   ) {
-    const newEntry = new MFTEntry(owner, index);
+    const newEntry = new NTFSFileEntry(owner, index);
 
     await newEntry.parse(clusterNumber, cluster);
 
@@ -176,6 +237,10 @@ export class MFTEntry {
     );
   }
 
+  async open(): Promise<NTFSFile> {
+    return NTFSFile.open(this);
+  }
+
   private async readFileReference(reader: BinaryReader) {
     return reader.struct(async reader => ({
       mftEntryIndex: reader.u32(),
@@ -197,10 +262,10 @@ export class MFTEntry {
 
     const fileNameStructure = await fileNameData.struct(async reader => ({
       parentFileReference: reader.u64(),
-      creationDateTime: reader.u64(),
-      lastModificationDateTime: reader.u64(),
-      mftEntryLastModifyDateTime: reader.u64(),
-      lastAccessDateTime: reader.u64(),
+      creationDateTime: ntDateTime(reader),
+      lastModificationDateTime: ntDateTime(reader),
+      mftEntryLastModifyDateTime: ntDateTime(reader),
+      lastAccessDateTime: ntDateTime(reader),
       allocatedFileSize: reader.u64(),
       fileSize: reader.u64(),
       fileAttributeFlags: reader.u32(),
@@ -214,7 +279,34 @@ export class MFTEntry {
       fileNameStructure.nameStringSize * 2
     );
 
+    // console.log(fileNameStructure);
+
     return fileNameStructure;
+  }
+
+  private async readStandardInformationAttribute() {
+    const standardInformationAttribute = this.getAttributeByType(
+      AttributeType.STANDARD_INFORMATION
+    );
+
+    if (standardInformationAttribute === undefined) {
+      return undefined;
+    }
+
+    const standardInformationData = BinaryReader.create(
+      await this.getAttributeData(standardInformationAttribute)
+    );
+
+    return standardInformationData.struct(async reader => ({
+      creationDateTime: ntDateTime(reader),
+      lastModifyDateTime: ntDateTime(reader),
+      mftEntryLastModifyDateTime: ntDateTime(reader),
+      lastAccessDateTime: ntDateTime(reader),
+      fileAttributeFlags: ntDateTime(reader),
+      uk1: reader.u32(),
+      uk2: reader.u32(),
+      uk3: reader.u32(),
+    }));
   }
 
   async getData(): Promise<Buffer> {
@@ -325,7 +417,7 @@ export class MFTEntry {
     }
   }
 
-  private getAttributeByType(type: AttributeType) {
+  getAttributeByType(type: AttributeType) {
     return this.mftAttributes.find(attr => attr.attributeType === type);
   }
 }
@@ -333,12 +425,24 @@ export class MFTEntry {
 export class NTFS {
   private _bootSectorHeader: BootSectorHeader | undefined = undefined;
 
-  private mftEntries: MFTEntry[] = [];
+  private files: NTFSFileEntry[] = [];
+  private _mft: NTFSFileEntry | undefined = undefined;
 
   private constructor(private file: File) {}
 
   private get bootSectorHeader() {
     return this._bootSectorHeader || expect('BootSectorHeader === undefined');
+  }
+
+  get mft() {
+    return this._mft || expect('MFT === undefined');
+  }
+
+  get clusterSize() {
+    return (
+      this.bootSectorHeader.bytesPerSector *
+      this.bootSectorHeader.sectorsPerCluster
+    );
   }
 
   static async open(file: File): Promise<NTFS> {
@@ -358,16 +462,18 @@ export class NTFS {
       await this.readClusters(mftClusterNumber)
     );
 
-    const mftEntry = await MFTEntry.create(
+    this._mft = await NTFSFileEntry.create(
       this,
       0,
       mftClusterNumber,
       mftCluster
     );
 
-    const mftData = BinaryReader.create(await mftEntry.getData());
+    // const mftData = BinaryReader.create(await mftEntry.getData());
 
-    await this.readMFT(mftClusterNumber, mftData);
+    const mftFile = await this._mft.open();
+
+    await this.readMFT(mftClusterNumber, mftFile);
   }
 
   private async readBootSector() {
@@ -405,10 +511,7 @@ export class NTFS {
   }
 
   async readClusters(index: number, count = 1) {
-    const clusterSize =
-      this.bootSectorHeader.bytesPerSector *
-      this.bootSectorHeader.sectorsPerCluster;
-
+    const clusterSize = this.clusterSize;
     if (count === 1) {
       return this.file.readAbsolute(index * clusterSize, clusterSize);
     } else {
@@ -416,13 +519,13 @@ export class NTFS {
     }
   }
 
-  private async readMFT(mftBaseCluster: number, mftData: BinaryReader) {
+  private async readMFT(mftBaseCluster: number, mftData: File) {
     let index = 0;
 
     // console.log(mftData.buffer.length);
 
-    while (mftData.tell() < mftData.buffer.length) {
-      const entry = BinaryReader.create(mftData.read(1024));
+    for (let i = 0; i < 32; i++) {
+      const entry = BinaryReader.create(await mftData.read(1024));
 
       if ((await entry.peek(async reader => reader.u32())) === 0) {
         index += 1;
@@ -431,14 +534,14 @@ export class NTFS {
       }
 
       // TODO(joshua): Calculate correct cluster numbers.
-      const newEntry = await MFTEntry.create(
+      const newEntry = await NTFSFileEntry.create(
         this,
         index,
         mftBaseCluster + index * 2,
         entry
       );
 
-      this.mftEntries.push(newEntry);
+      this.files.push(newEntry);
 
       index += 1;
     }
@@ -465,6 +568,8 @@ export async function ntfsMain(args: string[]): Promise<number> {
   const partition = mbr.partitions[1];
 
   const ntfs = await NTFS.open(partition);
+
+  console.log(new Date(), 'NTFS Opened');
 
   console.log(new Date(), 'Finished');
 
