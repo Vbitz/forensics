@@ -2,7 +2,7 @@
 
 import { toHex, expect } from './common';
 import { EWFFile } from './ewfFile';
-import { MemoryFile, File } from './file';
+import { MemoryFile, File, DiskFile } from './file';
 import { promises, read } from 'fs';
 import { BinaryReader } from './reader';
 
@@ -460,9 +460,9 @@ export class NTFS {
 export async function ntfsMain(args: string[]): Promise<number> {
   const [fileName, ...rest] = args;
 
-  const memoryFile = await MemoryFile.open(fileName);
+  const diskFile = await DiskFile.open(fileName);
 
-  const ewfFile = await EWFFile.open(memoryFile);
+  const ewfFile = await EWFFile.open(diskFile);
 
   const ntfs = await NTFS.open(ewfFile);
 

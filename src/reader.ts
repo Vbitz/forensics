@@ -2,11 +2,22 @@ import * as zlib from 'zlib';
 
 export class BinaryReader {
   private currentOffset = 0;
+  private bigEndian = false;
 
   private constructor(readonly buffer: Buffer) {}
 
+  get length() {
+    return this.buffer.length;
+  }
+
   static create(buff: Buffer): BinaryReader {
     return new BinaryReader(buff);
+  }
+
+  setBigEndian(): this {
+    this.bigEndian = true;
+
+    return this;
   }
 
   seek(offset: number) {
@@ -113,25 +124,37 @@ export class BinaryReader {
 
   u8() {
     const ret = this.buffer.readUInt8(this.currentOffset);
+
     this.currentOffset += 1;
+
     return ret;
   }
 
   s8() {
     const ret = this.buffer.readInt8(this.currentOffset);
+
     this.currentOffset += 1;
+
     return ret;
   }
 
   u16() {
-    const ret = this.buffer.readUInt16LE(this.currentOffset);
+    const ret = this.bigEndian
+      ? this.buffer.readUInt16BE(this.currentOffset)
+      : this.buffer.readUInt16LE(this.currentOffset);
+
     this.currentOffset += 2;
+
     return ret;
   }
 
   u32() {
-    const ret = this.buffer.readUInt32LE(this.currentOffset);
+    const ret = this.bigEndian
+      ? this.buffer.readUInt32BE(this.currentOffset)
+      : this.buffer.readUInt32LE(this.currentOffset);
+
     this.currentOffset += 4;
+
     return ret;
   }
 
@@ -139,7 +162,11 @@ export class BinaryReader {
     const first = this.u32();
     const second = this.u32();
 
-    return first + (second >> 32);
+    if (this.bigEndian) {
+      return second + first * 0xffffffff;
+    } else {
+      return first + second * 0xffffffff;
+    }
   }
 
   struct<T>(cb: (reader: BinaryReader) => Promise<T>): Promise<T> {
