@@ -29,6 +29,9 @@ export class VMWareDiskFile extends File {
 
   private grainDirectory: number[] | undefined = undefined;
 
+  private lastGrainDirectoryEntry = -1;
+  private lastGrainTable: number[] | undefined = undefined;
+
   private constructor(private file: File) {
     super();
   }
@@ -42,13 +45,26 @@ export class VMWareDiskFile extends File {
   }
 
   async readAbsolute(offset: number, size: number): Promise<Buffer> {
-    console.log('VMDKRead', offset, size);
+    // console.log('VMDKRead', offset, size);
     const sector = Math.floor(offset / this.sectorSize);
+
     const sectorOffset = offset % this.sectorSize;
 
     if (sectorOffset + size > this.sectorSize) {
       // Determine how many sectors are spanned.
-      throw new Error('Cross sector reads not implemented');
+
+      if (sectorOffset === 0 && size % this.sectorSize === 0) {
+        const sectorCount = size / this.sectorSize;
+        const ret: Buffer[] = [];
+
+        for (let i = sector; i < sector + sectorCount; i++) {
+          ret.push(await this.readImageSector(i));
+        }
+
+        return Buffer.concat(ret);
+      } else {
+        throw new Error('Unaligned cross sector reads not implemented');
+      }
     } else {
       const sectorData = await this.readImageSector(sector);
 
@@ -109,21 +125,30 @@ export class VMWareDiskFile extends File {
 
     const grainDirectoryEntry = this.grainDirectory[grainDirectoryEntryIndex];
 
-    const grainTableReader = BinaryReader.create(
-      await this.readSectors(grainDirectoryEntry, 4)
-    );
-
-    const grainTable: number[] = [];
-
-    for (let i = 0; i < grainTableReader.length / 4; i++) {
-      grainTable.push(grainTableReader.u32());
-    }
-
     const grainTableIndex = Math.floor(
       (sector % this.gtCoverage) / this.grainSize
     );
 
-    const grainTableEntry = grainTable[grainTableIndex];
+    if (grainDirectoryEntry !== this.lastGrainDirectoryEntry) {
+      const grainTableReader = BinaryReader.create(
+        await this.readSectors(grainDirectoryEntry, 4)
+      );
+
+      const grainTable: number[] = [];
+
+      for (let i = 0; i < grainTableReader.length / 4; i++) {
+        grainTable.push(grainTableReader.u32());
+      }
+
+      this.lastGrainTable = grainTable;
+      this.lastGrainDirectoryEntry = grainDirectoryEntry;
+    }
+
+    if (this.lastGrainTable === undefined) {
+      throw new Error('Not Implemented');
+    }
+
+    const grainTableEntry = this.lastGrainTable[grainTableIndex];
 
     return grainTableEntry;
   }

@@ -1,3 +1,5 @@
+import 'source-map-support/register';
+
 import { ewfFileMain } from './ewfFile';
 import { ntfsMain } from './ntfs';
 import { qCow2Main } from './qcow2';

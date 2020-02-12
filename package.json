@@ -2,6 +2,7 @@
   "name": "forensics",
   "devDependencies": {
     "@types/node": "^10.0.3",
+    "@types/source-map-support": "^0.5.1",
     "gts": "^1.1.2",
     "typescript": "~3.7.0"
   },
@@ -14,5 +15,8 @@
     "prepare": "yarn run compile",
     "pretest": "yarn run compile",
     "posttest": "yarn run check"
+  },
+  "dependencies": {
+    "source-map-support": "^0.5.16"
   }
 }

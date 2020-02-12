@@ -47,10 +47,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^10.0.3":
+"@types/node@npm:*, @types/node@npm:^10.0.3":
   version: 10.17.14
   resolution: "@types/node@npm:10.17.14"
   checksum: 3e457e3046c07ec7dcc5c9e35a67f417f6fc36bc6d24434e38ef2c4088da68f64c0f2969363068fa1a081366213d75f3cecfabf23d984635dea7ba1812d8412d
+  languageName: node
+  linkType: hard
+
+"@types/source-map-support@npm:^0.5.1":
+  version: 0.5.1
+  resolution: "@types/source-map-support@npm:0.5.1"
+  dependencies:
+    "@types/node": "*"
+  checksum: 80dbc4fe4971099121c287b5d4c9f170b8b40f9aa5966d3398f31a5743a5fad63b8031c984b4aad6b47a1329b6935406f0b7337a2a8f50793e305c198b3bc5f3
   languageName: node
   linkType: hard
 
@@ -165,6 +174,13 @@ __metadata:
     balanced-match: ^1.0.0
     concat-map: 0.0.1
   checksum: 6bf044764309bad6d15c6eabc39e93701643b00192439251afe8b4e0c08f941b840f3c8844b163fc307111459121712fb74e40073ddffb0358f8a640f14ba7b1
+  languageName: node
+  linkType: hard
+
+"buffer-from@npm:^1.0.0":
+  version: 1.1.1
+  resolution: "buffer-from@npm:1.1.1"
+  checksum: b34c802232998fe342f64398c6bfbcd74c7e3d8115513ccc1c932c8ea0e0a205293847bc69be4c32ed9388ca151f635b005019e0bddbd80a5df34da537d722d6
   languageName: node
   linkType: hard
 
@@ -537,7 +553,9 @@ __metadata:
   resolution: "forensics@workspace:."
   dependencies:
     "@types/node": ^10.0.3
+    "@types/source-map-support": ^0.5.1
     gts: ^1.1.2
+    source-map-support: ^0.5.16
     typescript: ~3.7.0
   languageName: unknown
   linkType: soft
@@ -1479,6 +1497,23 @@ __metadata:
   version: 3.0.2
   resolution: "signal-exit@npm:3.0.2"
   checksum: b3d9a5567188a680bdb67fb996c2ffe49dfb1db5295d4e55e34ce77ca8e7a9f3f81672b71279fed5dcb2057afd133a5a7d5bd4de4652a8714c668460900f183c
+  languageName: node
+  linkType: hard
+
+"source-map-support@npm:^0.5.16":
+  version: 0.5.16
+  resolution: "source-map-support@npm:0.5.16"
+  dependencies:
+    buffer-from: ^1.0.0
+    source-map: ^0.6.0
+  checksum: 8cbb70583ff6b74dabf1a37ffca840aed7e419e21fad3803485d4ac79af7cdb36819b271dc1a5703a4ee615487a03b2a13a052681d5d9d9050eda33b835e214c
+  languageName: node
+  linkType: hard
+
+"source-map@npm:^0.6.0":
+  version: 0.6.1
+  resolution: "source-map@npm:0.6.1"
+  checksum: fa17f30e37dfa8d8065fc98e8c51ae80d7050055f90dbd40e8644269bda04707386180c4c43af7104a29af56109663e994ccbc2cf766af01e915285c7f93cc40
   languageName: node
   linkType: hard
 

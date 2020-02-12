@@ -5,6 +5,8 @@ import { EWFFile } from './ewfFile';
 import { MemoryFile, File, DiskFile } from './file';
 import { promises, read } from 'fs';
 import { BinaryReader } from './reader';
+import { VMWareDiskFile } from './vmdk';
+import { MasterBootRecord } from './mbr';
 
 interface BootSectorHeader {
   jmpInstruction: Buffer;
@@ -143,6 +145,8 @@ export class MFTEntry {
       index: reader.u32(),
     }));
 
+    // console.log(mftEntryHeader);
+
     this.cluster.seek(mftEntryHeader.firstAttributesOffset);
 
     while (true) {
@@ -228,6 +232,10 @@ export class MFTEntry {
   private async readAttribute(
     cluster: BinaryReader
   ): Promise<MFTAttribute | undefined> {
+    if (cluster.tell() > cluster.buffer.length) {
+      return undefined;
+    }
+
     if (
       (await cluster.peek(async reader => reader.u32())) ===
       AttributeType.END_OF_ATTRIBUTES
@@ -427,6 +435,8 @@ export class NTFS {
   private async readMFT(mftBaseCluster: number, mftData: BinaryReader) {
     let index = 0;
 
+    // console.log(mftData.buffer.length);
+
     while (mftData.tell() < mftData.buffer.length) {
       const entry = BinaryReader.create(mftData.read(1024));
 
@@ -462,9 +472,13 @@ export async function ntfsMain(args: string[]): Promise<number> {
 
   const diskFile = await DiskFile.open(fileName);
 
-  const ewfFile = await EWFFile.open(diskFile);
+  const vmdkFile = await VMWareDiskFile.open(diskFile);
 
-  const ntfs = await NTFS.open(ewfFile);
+  const mbr = await MasterBootRecord.open(vmdkFile);
+
+  const partition = mbr.partitions[1];
+
+  const ntfs = await NTFS.open(partition);
 
   return 0;
 }
