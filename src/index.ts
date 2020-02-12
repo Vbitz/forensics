@@ -2,6 +2,7 @@ import { ewfFileMain } from './ewfFile';
 import { ntfsMain } from './ntfs';
 import { qCow2Main } from './qcow2';
 import { vmdkMain } from './vmdk';
+import { mbrMain } from './mbr';
 
 async function main(args: string[]): Promise<number> {
   const [entryPoint, ...rest] = args;
@@ -14,6 +15,8 @@ async function main(args: string[]): Promise<number> {
     return qCow2Main(rest);
   } else if (entryPoint === 'vmdk') {
     return vmdkMain(rest);
+  } else if (entryPoint === 'mbr') {
+    return mbrMain(rest);
   } else {
     console.error('Invalid EntryPoint');
     return 1;
