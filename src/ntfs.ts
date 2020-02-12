@@ -310,17 +310,11 @@ export class MFTEntry {
 
   private async getAttributeData(attr: MFTAttribute): Promise<Buffer> {
     if (attr.nonResidentData !== undefined) {
-      const clusters: Buffer[] = [];
-
-      for (
-        let i = attr.nonResidentData.firstVirtualClusterNumber;
-        i < attr.nonResidentData.lastVirtualClusterNumber;
-        i++
-      ) {
-        clusters.push(await this.owner.readClusters(this.clusterNumber + i));
-      }
-
-      return Buffer.concat(clusters);
+      return this.owner.readClusters(
+        this.clusterNumber + attr.nonResidentData.firstVirtualClusterNumber,
+        attr.nonResidentData.lastVirtualClusterNumber -
+          attr.nonResidentData.firstVirtualClusterNumber
+      );
     } else if (attr.residentData !== undefined) {
       return this.cluster.seekTemp(
         attr.offset + attr.residentData.dataOffset,
@@ -373,11 +367,7 @@ export class NTFS {
 
     const mftData = BinaryReader.create(await mftEntry.getData());
 
-    await promises.writeFile('mft.bin', mftData.buffer);
-
     await this.readMFT(mftClusterNumber, mftData);
-
-    // console.log(mftCluster);
   }
 
   private async readBootSector() {
@@ -415,20 +405,14 @@ export class NTFS {
   }
 
   async readClusters(index: number, count = 1) {
-    if (count === 1) {
-      const clusterSize =
-        this.bootSectorHeader.bytesPerSector *
-        this.bootSectorHeader.sectorsPerCluster;
+    const clusterSize =
+      this.bootSectorHeader.bytesPerSector *
+      this.bootSectorHeader.sectorsPerCluster;
 
+    if (count === 1) {
       return this.file.readAbsolute(index * clusterSize, clusterSize);
     } else {
-      const clusters: Buffer[] = [];
-
-      for (let i = 0; i < count; i++) {
-        clusters.push(await this.readClusters(index + i));
-      }
-
-      return Buffer.concat(clusters);
+      return this.file.readAbsolute(index * clusterSize, clusterSize * count);
     }
   }
 
@@ -454,12 +438,6 @@ export class NTFS {
         entry
       );
 
-      console.log(
-        'Entry',
-        await newEntry.getFileName(),
-        newEntry.getAttributeNames()
-      );
-
       this.mftEntries.push(newEntry);
 
       index += 1;
@@ -470,15 +448,25 @@ export class NTFS {
 export async function ntfsMain(args: string[]): Promise<number> {
   const [fileName, ...rest] = args;
 
+  console.log(new Date(), 'Starting');
+
   const diskFile = await DiskFile.open(fileName);
+
+  console.log(new Date(), 'Disk File Opened');
 
   const vmdkFile = await VMWareDiskFile.open(diskFile);
 
+  console.log(new Date(), 'VMDK Opened');
+
   const mbr = await MasterBootRecord.open(vmdkFile);
+
+  console.log(new Date(), 'MBR Opened');
 
   const partition = mbr.partitions[1];
 
   const ntfs = await NTFS.open(partition);
+
+  console.log(new Date(), 'Finished');
 
   return 0;
 }
