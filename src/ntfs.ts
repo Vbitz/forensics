@@ -106,13 +106,13 @@ export class NTFSFile extends File {
   }
 
   static async open(entry: NTFSFileEntry) {
-    const dataAttribute = entry.getAttributeByType(AttributeType.DATA);
+    const dataAttribute = entry.getAttributesByType(AttributeType.DATA);
 
-    if (dataAttribute === undefined) {
-      throw new Error('No Data attribute');
+    if (dataAttribute.length !== 1) {
+      throw new Error('Only one data attribute is supported.');
     }
 
-    return new NTFSFile(entry, dataAttribute);
+    return new NTFSFile(entry, dataAttribute[0]);
   }
 
   async readAbsolute(offset: number, size: number): Promise<Buffer> {
@@ -232,9 +232,7 @@ export class NTFSFileEntry {
   }
 
   getAttributeNames() {
-    return this.mftAttributes.map(attr =>
-      attr.name !== undefined ? attr.name : attr.attributeTypeString
-    );
+    return this.mftAttributes.map(attr => attr.attributeTypeString);
   }
 
   async open(): Promise<NTFSFile> {
@@ -250,14 +248,14 @@ export class NTFSFileEntry {
   }
 
   private async readFileNameAttribute() {
-    const fileNameAttribute = this.getAttributeByType(AttributeType.FILE_NAME);
+    const fileNameAttribute = this.getAttributesByType(AttributeType.FILE_NAME);
 
-    if (fileNameAttribute === undefined) {
+    if (fileNameAttribute.length === 0) {
       return undefined;
     }
 
     const fileNameData = BinaryReader.create(
-      await this.getAttributeData(fileNameAttribute)
+      await this.getAttributeData(fileNameAttribute[0])
     );
 
     const fileNameStructure = await fileNameData.struct(async reader => ({
@@ -285,16 +283,16 @@ export class NTFSFileEntry {
   }
 
   private async readStandardInformationAttribute() {
-    const standardInformationAttribute = this.getAttributeByType(
+    const standardInformationAttribute = this.getAttributesByType(
       AttributeType.STANDARD_INFORMATION
     );
 
-    if (standardInformationAttribute === undefined) {
+    if (standardInformationAttribute.length !== 1) {
       return undefined;
     }
 
     const standardInformationData = BinaryReader.create(
-      await this.getAttributeData(standardInformationAttribute)
+      await this.getAttributeData(standardInformationAttribute[0])
     );
 
     return standardInformationData.struct(async reader => ({
@@ -310,15 +308,47 @@ export class NTFSFileEntry {
   }
 
   async getData(): Promise<Buffer> {
-    const dataAttribute = this.getAttributeByType(AttributeType.DATA);
+    const dataAttribute = this.getAttributesByType(AttributeType.DATA);
 
-    if (dataAttribute === undefined) {
+    if (dataAttribute.length !== 1) {
       throw new Error('Not Implemented');
     }
 
-    const mftData = await this.getAttributeData(dataAttribute);
+    const mftData = await this.getAttributeData(dataAttribute[0]);
 
     return mftData;
+  }
+
+  async readDirectoryEntries() {
+    const indexAttributes = this.getAttributesByType(AttributeType.INDEX_ROOT);
+
+    if (indexAttributes.length !== 1) {
+      throw new Error('Only 1 INDEX_ROOT is supported.');
+    }
+
+    const indexRootData = BinaryReader.create(
+      await this.getAttributeData(indexAttributes[0])
+    );
+
+    const indexRootHeader = await indexRootData.struct(async reader => ({
+      attributeType: reader.u32(),
+      collationType: reader.u32(),
+      indexEntrySize: reader.u32(),
+      indexEntryNumber: reader.u32(),
+    }));
+
+    // console.log(indexRootHeader);
+
+    const indexNodeHeaderStart = indexRootData.tell();
+
+    const indexNodeHeader = await indexRootData.struct(async reader => ({
+      indexValuesOffset: reader.u32(),
+      indexNodeSize: reader.u32(),
+      allocatedIndexNodeSize: reader.u32(),
+      indexNodeFlags: reader.u32(),
+    }));
+
+    // console.log(indexNodeHeader);
   }
 
   private async readAttribute(
@@ -417,8 +447,12 @@ export class NTFSFileEntry {
     }
   }
 
-  getAttributeByType(type: AttributeType) {
-    return this.mftAttributes.find(attr => attr.attributeType === type);
+  getAttributesByType(type: AttributeType) {
+    return this.mftAttributes.filter(attr => attr.attributeType === type);
+  }
+
+  getAttributesByName(name: string) {
+    return this.mftAttributes.filter(attr => attr.name === name);
   }
 }
 
@@ -427,6 +461,7 @@ export class NTFS {
 
   private files: NTFSFileEntry[] = [];
   private _mft: NTFSFileEntry | undefined = undefined;
+  private rootEntry: NTFSFileEntry | undefined = undefined;
 
   private constructor(private file: File) {}
 
@@ -436,6 +471,26 @@ export class NTFS {
 
   get mft() {
     return this._mft || expect('MFT === undefined');
+  }
+
+  async getRootEntry(): Promise<NTFSFileEntry> {
+    if (this.rootEntry !== undefined) {
+      return this.rootEntry;
+    }
+
+    for (const file of this.files) {
+      if (file.index > 32) {
+        break;
+      }
+
+      const fileName = await file.getFileName();
+
+      if (fileName === '.') {
+        this.rootEntry = file;
+        return file;
+      }
+    }
+    throw new Error('Could not find "." in MFT');
   }
 
   get clusterSize() {
@@ -570,6 +625,12 @@ export async function ntfsMain(args: string[]): Promise<number> {
   const ntfs = await NTFS.open(partition);
 
   console.log(new Date(), 'NTFS Opened');
+
+  const root = await ntfs.getRootEntry();
+
+  console.log(root.getAttributeNames());
+
+  console.log(await root.readDirectoryEntries());
 
   console.log(new Date(), 'Finished');
 
