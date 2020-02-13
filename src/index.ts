@@ -1,10 +1,10 @@
 import 'source-map-support/register';
 
-import { ewfFileMain } from './ewfFile';
-import { ntfsMain } from './ntfs';
-import { qCow2Main } from './qcow2';
-import { vmdkMain } from './vmdk';
-import { mbrMain } from './mbr';
+import { ewfFileMain } from './container/ewfFile';
+import { ntfsMain } from './filesystem/ntfs';
+import { qCow2Main } from './container/qcow2';
+import { vmdkMain } from './container/vmdk';
+import { mbrMain } from './container/mbr';
 
 async function main(args: string[]): Promise<number> {
   const [entryPoint, ...rest] = args;

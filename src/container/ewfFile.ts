@@ -1,8 +1,8 @@
 // Documentation from: https://github.com/libyal/libewf/blob/master/documentation/Expert%20Witness%20Compression%20Format%20%28EWF%29.asciidoc#compression
 
-import { File, MemoryFile } from './file';
-import { hexString, zipObject } from './common';
-import { BinaryReader } from './reader';
+import { File, MemoryFile } from '../file';
+import { hexString, zipObject } from '../common';
+import { BinaryReader } from '../reader';
 import { promises } from 'fs';
 
 const EWF_MAGIC = hexString('45', '56', '46', '09', '0d', '0a', 'ff', '00');

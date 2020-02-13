@@ -1,8 +1,8 @@
 // From: https://github.com/qemu/qemu/blob/523a2a42c3abd65b503610b2a18cd7fc74c6c61e/docs/interop/qcow2.txt
 
-import { DiskFile, File } from './file';
-import { BinaryReader } from './reader';
-import { toHex, swapEndian64 } from './common';
+import { DiskFile, File } from '../file';
+import { BinaryReader } from '../reader';
+import { toHex, swapEndian64 } from '../common';
 import { promises } from 'fs';
 
 interface Level1TableEntry {

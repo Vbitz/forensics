@@ -1,12 +1,10 @@
 // Documentation from: https://github.com/libyal/libfsntfs/blob/master/documentation/New%20Technologies%20File%20System%20(NTFS).asciidoc
 
-import { toHex, expect } from './common';
-import { EWFFile } from './ewfFile';
-import { MemoryFile, File, DiskFile } from './file';
-import { promises, read } from 'fs';
-import { BinaryReader } from './reader';
-import { VMWareDiskFile } from './vmdk';
-import { MasterBootRecord } from './mbr';
+import { toHex, expect } from '../common';
+import { File, DiskFile } from '../file';
+import { BinaryReader } from '../reader';
+import { VMWareDiskFile } from '../container/vmdk';
+import { MasterBootRecord } from '../container/mbr';
 
 interface BootSectorHeader {
   jmpInstruction: Buffer;

@@ -1,6 +1,6 @@
-import { File, DiskFile } from './file';
+import { File, DiskFile } from '../file';
 import { VMWareDiskFile } from './vmdk';
-import { BinaryReader } from './reader';
+import { BinaryReader } from '../reader';
 import { promises } from 'fs';
 
 export class MBRPartition extends File {

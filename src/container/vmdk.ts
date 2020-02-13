@@ -1,8 +1,8 @@
 // From: https://www.vmware.com/support/developer/vddk/vmdk_50_technote.pdf
 
-import { File, DiskFile } from './file';
-import { BinaryReader } from './reader';
-import { toHex, expect } from './common';
+import { File, DiskFile } from '../file';
+import { BinaryReader } from '../reader';
+import { toHex, expect } from '../common';
 import { promises } from 'fs';
 
 interface Extent {
