@@ -4,6 +4,7 @@ import { File, MemoryFile } from '../file';
 import { hexString, zipObject } from '../common';
 import { BinaryReader } from '../reader';
 import { promises } from 'fs';
+import { registryEntryPoint } from '../entryPoint';
 
 const EWF_MAGIC = hexString('45', '56', '46', '09', '0d', '0a', 'ff', '00');
 
@@ -281,7 +282,7 @@ export class EWFFile extends File {
   }
 }
 
-export async function ewfFileMain(args: string[]): Promise<number> {
+registryEntryPoint('ewf', async args => {
   const [fileName, ...rest] = args;
 
   const file = await MemoryFile.open(fileName);
@@ -295,4 +296,4 @@ export async function ewfFileMain(args: string[]): Promise<number> {
   }
 
   return 0;
-}
+});

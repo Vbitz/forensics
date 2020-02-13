@@ -2,6 +2,7 @@ import { File, DiskFile } from '../file';
 import { VMWareDiskFile } from './vmdk';
 import { BinaryReader } from '../reader';
 import { promises } from 'fs';
+import { registryEntryPoint } from '../entryPoint';
 
 export class MBRPartition extends File {
   static async create(
@@ -84,7 +85,7 @@ export class MasterBootRecord {
   }
 }
 
-export async function mbrMain(args: string[]): Promise<number> {
+registryEntryPoint('mbr', async args => {
   const [fileName, ...rest] = args;
 
   const file = await DiskFile.open(fileName);
@@ -98,4 +99,4 @@ export async function mbrMain(args: string[]): Promise<number> {
   await promises.writeFile('firstSector.bin', firstSector);
 
   return 0;
-}
+});

@@ -4,6 +4,7 @@ import { File, DiskFile } from '../file';
 import { BinaryReader } from '../reader';
 import { toHex, expect } from '../common';
 import { promises } from 'fs';
+import { registryEntryPoint } from '../entryPoint';
 
 interface Extent {
   type: 'RW';
@@ -242,7 +243,7 @@ export class VMWareDiskFile extends File {
   }
 }
 
-export async function vmdkMain(args: string[]): Promise<number> {
+registryEntryPoint('vmdk', async args => {
   const [fileName, ...rest] = args;
 
   const file = await DiskFile.open(fileName);
@@ -254,4 +255,4 @@ export async function vmdkMain(args: string[]): Promise<number> {
   await promises.writeFile('firstSector.bin', firstSector);
 
   return 0;
-}
+});

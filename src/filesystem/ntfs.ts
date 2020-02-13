@@ -5,6 +5,7 @@ import { File, DiskFile } from '../file';
 import { BinaryReader } from '../reader';
 import { VMWareDiskFile } from '../container/vmdk';
 import { MasterBootRecord } from '../container/mbr';
+import { registryEntryPoint } from '../entryPoint';
 
 interface BootSectorHeader {
   jmpInstruction: Buffer;
@@ -601,7 +602,7 @@ export class NTFS {
   }
 }
 
-export async function ntfsMain(args: string[]): Promise<number> {
+registryEntryPoint('ntfs', async args => {
   const [fileName, ...rest] = args;
 
   console.log(new Date(), 'Starting');
@@ -633,4 +634,4 @@ export async function ntfsMain(args: string[]): Promise<number> {
   console.log(new Date(), 'Finished');
 
   return 0;
-}
+});

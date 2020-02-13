@@ -4,6 +4,7 @@ import { DiskFile, File } from '../file';
 import { BinaryReader } from '../reader';
 import { toHex, swapEndian64 } from '../common';
 import { promises } from 'fs';
+import { registryEntryPoint } from '../entryPoint';
 
 interface Level1TableEntry {
   flag: number;
@@ -177,7 +178,7 @@ export class QCow2Image extends File {
   }
 }
 
-export async function qCow2Main(args: string[]): Promise<number> {
+registryEntryPoint('qcow2', async args => {
   const [fileName, ...rest] = args;
 
   const file = await DiskFile.open(fileName);
@@ -187,4 +188,4 @@ export async function qCow2Main(args: string[]): Promise<number> {
   await qCow2.read(QCow2Image.sectorSize);
 
   return 0;
-}
+});
