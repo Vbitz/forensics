@@ -31,19 +31,23 @@ export class WebApplication {
   }
 
   async openFile(file: File) {
+    console.log('Opening Abstract Blob File');
     const blobFile = await BlobFile.create(file);
 
+    console.log('Opening Disk Image');
     const vmdk = await VMWareDiskFile.open(blobFile);
 
+    console.log('Opening Master Boot Record');
     const mbr = await MasterBootRecord.open(vmdk);
 
+    console.log('Opening NTFS for root partition');
     const ntfs = await NTFS.open(mbr.partitions[0]);
 
     const root = await ntfs.getRootEntry();
 
-    console.log(root.getAttributeNames());
+    console.log('Root Attribute Names', root.getAttributeNames());
 
-    console.log(await root.readDirectoryEntries());
+    console.log('Root Directory Entry', await root.readDirectoryEntries());
   }
 }
 
