@@ -1,10 +1,8 @@
 // From: https://www.vmware.com/support/developer/vddk/vmdk_50_technote.pdf
 
-import { File, DiskFile } from '../file';
+import { File } from '../file';
 import { BinaryReader } from '../reader';
 import { toHex, expect } from '../common';
-import { promises } from 'fs';
-import { registryEntryPoint } from '../entryPoint';
 
 interface Extent {
   type: 'RW';
@@ -242,17 +240,3 @@ export class VMWareDiskFile extends File {
     }
   }
 }
-
-registryEntryPoint('vmdk', async args => {
-  const [fileName, ...rest] = args;
-
-  const file = await DiskFile.open(fileName);
-
-  const vmdk = await VMWareDiskFile.open(file);
-
-  const firstSector = await vmdk.read(512);
-
-  await promises.writeFile('firstSector.bin', firstSector);
-
-  return 0;
-});

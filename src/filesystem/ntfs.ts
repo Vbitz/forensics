@@ -1,7 +1,7 @@
 // Documentation from: https://github.com/libyal/libfsntfs/blob/master/documentation/New%20Technologies%20File%20System%20(NTFS).asciidoc
 
 import { toHex, expect } from '../common';
-import { File, DiskFile } from '../file';
+import { File } from '../file';
 import { BinaryReader } from '../reader';
 import { VMWareDiskFile } from '../container/vmdk';
 import { MasterBootRecord } from '../container/mbr';
@@ -149,11 +149,11 @@ export class NTFSFile extends File {
 function ntDateTime(reader: BinaryReader): Date {
   let value = BigInt(reader.u64());
 
-  const adjust = 11644473600000n * 10000n;
+  const adjust = BigInt(11644473600000) * BigInt(10000);
 
   value -= adjust;
 
-  return new Date(Number(value / 10000n));
+  return new Date(Number(value / BigInt(10000)));
 }
 
 export class NTFSFileEntry {
@@ -601,37 +601,3 @@ export class NTFS {
     }
   }
 }
-
-registryEntryPoint('ntfs', async args => {
-  const [fileName, ...rest] = args;
-
-  console.log(new Date(), 'Starting');
-
-  const diskFile = await DiskFile.open(fileName);
-
-  console.log(new Date(), 'Disk File Opened');
-
-  const vmdkFile = await VMWareDiskFile.open(diskFile);
-
-  console.log(new Date(), 'VMDK Opened');
-
-  const mbr = await MasterBootRecord.open(vmdkFile);
-
-  console.log(new Date(), 'MBR Opened');
-
-  const partition = mbr.partitions[1];
-
-  const ntfs = await NTFS.open(partition);
-
-  console.log(new Date(), 'NTFS Opened');
-
-  const root = await ntfs.getRootEntry();
-
-  console.log(root.getAttributeNames());
-
-  console.log(await root.readDirectoryEntries());
-
-  console.log(new Date(), 'Finished');
-
-  return 0;
-});

@@ -1,4 +1,4 @@
-import { File, DiskFile } from '../file';
+import { File } from '../file';
 import { VMWareDiskFile } from './vmdk';
 import { BinaryReader } from '../reader';
 import { promises } from 'fs';
@@ -85,18 +85,18 @@ export class MasterBootRecord {
   }
 }
 
-registryEntryPoint('mbr', async args => {
-  const [fileName, ...rest] = args;
+// registryEntryPoint('mbr', async args => {
+//   const [fileName, ...rest] = args;
 
-  const file = await DiskFile.open(fileName);
+//   const file = await DiskFile.open(fileName);
 
-  const vmdk = await VMWareDiskFile.open(file);
+//   const vmdk = await VMWareDiskFile.open(file);
 
-  const mbr = await MasterBootRecord.open(vmdk);
+//   const mbr = await MasterBootRecord.open(vmdk);
 
-  const firstSector = await mbr.partitions[1].read(512);
+//   const firstSector = await mbr.partitions[1].read(512);
 
-  await promises.writeFile('firstSector.bin', firstSector);
+//   await promises.writeFile('firstSector.bin', firstSector);
 
-  return 0;
-});
+//   return 0;
+// });

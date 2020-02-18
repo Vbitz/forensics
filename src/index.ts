@@ -1,12 +1,12 @@
 import 'source-map-support/register';
 
-import './container/ewfFile';
-import './container/mbr';
-import './container/qcow2';
-import './container/vmdk';
+// import './container/ewfFile';
+// import './container/mbr';
+// import './container/qcow2';
+import './container/vmdk.main';
 
-import './filesystem/ntfs';
-import './filesystem/udf';
+import './filesystem/ntfs.main';
+import './filesystem/udf.main';
 
 import { callEntryPoint } from './entryPoint';
 

@@ -1,5 +1,4 @@
-import { registryEntryPoint } from '../entryPoint';
-import { DiskFile, File } from '../file';
+import { File } from '../file';
 
 export class UniversalDiskFormat {
   private constructor(private file: File) {}
@@ -14,13 +13,3 @@ export class UniversalDiskFormat {
 
   private async parse() {}
 }
-
-registryEntryPoint('udf', async args => {
-  const [fileName, ...rest] = args;
-
-  const file = await DiskFile.open(fileName);
-
-  const udf = await UniversalDiskFormat.open(file);
-
-  return 0;
-});

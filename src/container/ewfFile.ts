@@ -3,7 +3,6 @@
 import { File, MemoryFile } from '../file';
 import { hexString, zipObject } from '../common';
 import { BinaryReader } from '../reader';
-import { promises } from 'fs';
 import { registryEntryPoint } from '../entryPoint';
 
 const EWF_MAGIC = hexString('45', '56', '46', '09', '0d', '0a', 'ff', '00');
@@ -282,18 +281,18 @@ export class EWFFile extends File {
   }
 }
 
-registryEntryPoint('ewf', async args => {
-  const [fileName, ...rest] = args;
+// registryEntryPoint('ewf', async args => {
+//   const [fileName, ...rest] = args;
 
-  const file = await MemoryFile.open(fileName);
+//   const file = await MemoryFile.open(fileName);
 
-  const ewfFile = await EWFFile.open(file);
+//   const ewfFile = await EWFFile.open(file);
 
-  for (let i = 0; i < ewfFile.numberOfChunks; i++) {
-    const chunk = await ewfFile.readChunk(i);
+//   for (let i = 0; i < ewfFile.numberOfChunks; i++) {
+//     const chunk = await ewfFile.readChunk(i);
 
-    process.stderr.write('.');
-  }
+//     process.stderr.write('.');
+//   }
 
-  return 0;
-});
+//   return 0;
+// });

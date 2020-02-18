@@ -19,19 +19,3 @@ export function toHex(str: string) {
 export function expect(message: string): never {
   throw new Error('Expect: ' + message);
 }
-
-// From: https://en.wikipedia.org/wiki/Endianness#Byte_swap
-export function swapEndian32(value: bigint) {
-  let result = 0n;
-  result |= (value & 0x000000ffn) << 24n;
-  result |= (value & 0x0000ff00n) << 8n;
-  result |= (value & 0x00ff0000n) >> 8n;
-  result |= (value & 0xff000000n) >> 24n;
-  return result;
-}
-
-export function swapEndian64(value: bigint): bigint {
-  return (
-    (swapEndian32(value & 0xffffffffn) << 32n) | swapEndian32(value >> 32n)
-  );
-}

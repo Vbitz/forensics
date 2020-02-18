@@ -1,10 +1,26 @@
 // From: https://github.com/qemu/qemu/blob/523a2a42c3abd65b503610b2a18cd7fc74c6c61e/docs/interop/qcow2.txt
 
-import { DiskFile, File } from '../file';
+import { File } from '../file';
 import { BinaryReader } from '../reader';
-import { toHex, swapEndian64 } from '../common';
+import { toHex } from '../common';
 import { promises } from 'fs';
 import { registryEntryPoint } from '../entryPoint';
+
+// From: https://en.wikipedia.org/wiki/Endianness#Byte_swap
+export function swapEndian32(value: bigint) {
+  let result = 0n;
+  result |= (value & 0x000000ffn) << 24n;
+  result |= (value & 0x0000ff00n) << 8n;
+  result |= (value & 0x00ff0000n) >> 8n;
+  result |= (value & 0xff000000n) >> 24n;
+  return result;
+}
+
+export function swapEndian64(value: bigint): bigint {
+  return (
+    (swapEndian32(value & 0xffffffffn) << 32n) | swapEndian32(value >> 32n)
+  );
+}
 
 interface Level1TableEntry {
   flag: number;
@@ -178,14 +194,14 @@ export class QCow2Image extends File {
   }
 }
 
-registryEntryPoint('qcow2', async args => {
-  const [fileName, ...rest] = args;
+// registryEntryPoint('qcow2', async args => {
+//   const [fileName, ...rest] = args;
 
-  const file = await DiskFile.open(fileName);
+//   const file = await DiskFile.open(fileName);
 
-  const qCow2 = await QCow2Image.open(file);
+//   const qCow2 = await QCow2Image.open(file);
 
-  await qCow2.read(QCow2Image.sectorSize);
+//   await qCow2.read(QCow2Image.sectorSize);
 
-  return 0;
-});
+//   return 0;
+// });
