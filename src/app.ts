@@ -1,4 +1,4 @@
-import 'source-map-support/register';
+// import 'source-map-support/register';
 
 import { VMWareDiskFile } from './container/vmdk';
 import { NTFS } from './filesystem/ntfs';

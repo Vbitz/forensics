@@ -1,6 +1,6 @@
 // Documentation from: https://github.com/libyal/libfsntfs/blob/master/documentation/New%20Technologies%20File%20System%20(NTFS).asciidoc
 
-import { toHex, expect } from '../common';
+import { toHex, expect, toBitmap, hexDump } from '../common';
 import { File } from '../file';
 import { BinaryReader } from '../reader';
 import { VMWareDiskFile } from '../container/vmdk';
@@ -63,6 +63,8 @@ interface MFTNonResidentData {
   dataSize: number;
   validDataSize: number;
   totalAllocatedSize: number | undefined;
+  restData: Buffer | undefined;
+  restOffset: number | undefined;
 }
 
 interface MFTResidentData {
@@ -70,6 +72,26 @@ interface MFTResidentData {
   dataOffset: number;
   indexedFlag: number;
   padding: Buffer;
+}
+
+interface DataRun {
+  numberOfClusterBlocks: number;
+  clusterBlockNumber: number;
+}
+
+interface FileReference {
+  mftEntryIndex: number;
+  padding: number;
+  sequenceNumber: number;
+}
+
+interface IndexValue {
+  fileReference: FileReference;
+  indexValueSize: number;
+  indexKeyDataSize: number;
+  indexValueFlags: number;
+  indexKeyData: Buffer | undefined;
+  subNodeVCN: number | undefined;
 }
 
 enum AttributeType {
@@ -155,6 +177,77 @@ function ntDateTime(reader: BinaryReader): Date {
 
   return new Date(Number(value / BigInt(10000)));
 }
+
+const readIndexRootHeader = BinaryReader.makeStructure(async reader => ({
+  attributeType: reader.u32(),
+  collationType: reader.u32(),
+  indexEntrySize: reader.u32(),
+  indexEntryNumber: reader.u32(),
+}));
+
+const readIndexNodeHeader = BinaryReader.makeStructure(async reader => ({
+  indexValuesOffset: reader.u32(),
+  indexNodeSize: reader.u32(),
+  allocatedIndexNodeSize: reader.u32(),
+  indexNodeFlags: reader.u32(),
+}));
+
+const readIndexEntryHeader = BinaryReader.makeStructure(async reader => ({
+  signature: reader.assertMagic(toHex('INDX')),
+  fixUpValuesOffset: reader.u16(),
+  fixUpValuesCount: reader.u16(),
+  metadataTransactionJournalSequenceNumber: reader.u64(),
+  indexEntryVCN: reader.u64(),
+}));
+
+const readFileReference = BinaryReader.makeStructure(async reader => ({
+  mftEntryIndex: reader.u32(),
+  padding: reader.u16(),
+  sequenceNumber: reader.u16(),
+}));
+
+const readFileNameAttribute = BinaryReader.makeStructure(async reader => {
+  const value = await reader.struct(async reader => ({
+    parentFileReference: await readFileReference(reader),
+    creationDateTime: ntDateTime(reader),
+    lastModificationDateTime: ntDateTime(reader),
+    mftEntryLastModifyDateTime: ntDateTime(reader),
+    lastAccessDateTime: ntDateTime(reader),
+    allocatedFileSize: reader.u64(),
+    fileSize: reader.u64(),
+    fileAttributeFlags: reader.u32(),
+    extendedData: reader.u32(),
+    nameStringSize: reader.u8(),
+    nameNamespace: reader.u8(),
+    nameString: '',
+  }));
+
+  value.nameString = reader.utf16le(value.nameStringSize * 2);
+
+  return value;
+});
+
+const readIndexValue = BinaryReader.makeStructure(async reader => {
+  const value: IndexValue = await reader.struct(async reader => ({
+    fileReference: await readFileReference(reader),
+    indexValueSize: reader.u16(),
+    indexKeyDataSize: reader.u16(),
+    indexValueFlags: reader.u8(),
+    padding: reader.read(3),
+    indexKeyData: undefined,
+    subNodeVCN: undefined,
+  }));
+
+  if (value.indexKeyDataSize > 0) {
+    value.indexKeyData = reader.read(value.indexKeyDataSize);
+  }
+
+  if (value.indexValueFlags & 0x00000001) {
+    value.subNodeVCN = reader.u64();
+  }
+
+  return value;
+});
 
 export class NTFSFileEntry {
   clusterNumber = 0;
@@ -254,27 +347,10 @@ export class NTFSFileEntry {
     }
 
     const fileNameData = BinaryReader.create(
-      await this.getAttributeData(fileNameAttribute[0])
+      await this.readAttributeData(fileNameAttribute[0])
     );
 
-    const fileNameStructure = await fileNameData.struct(async reader => ({
-      parentFileReference: reader.u64(),
-      creationDateTime: ntDateTime(reader),
-      lastModificationDateTime: ntDateTime(reader),
-      mftEntryLastModifyDateTime: ntDateTime(reader),
-      lastAccessDateTime: ntDateTime(reader),
-      allocatedFileSize: reader.u64(),
-      fileSize: reader.u64(),
-      fileAttributeFlags: reader.u32(),
-      extendedData: reader.u32(),
-      nameStringSize: reader.u8(),
-      nameNamespace: reader.u8(),
-      nameString: '',
-    }));
-
-    fileNameStructure.nameString = fileNameData.utf16le(
-      fileNameStructure.nameStringSize * 2
-    );
+    const fileNameStructure = await readFileNameAttribute(fileNameData);
 
     // console.log(fileNameStructure);
 
@@ -291,7 +367,7 @@ export class NTFSFileEntry {
     }
 
     const standardInformationData = BinaryReader.create(
-      await this.getAttributeData(standardInformationAttribute[0])
+      await this.readAttributeData(standardInformationAttribute[0])
     );
 
     return standardInformationData.struct(async reader => ({
@@ -313,41 +389,143 @@ export class NTFSFileEntry {
       throw new Error('Not Implemented');
     }
 
-    const mftData = await this.getAttributeData(dataAttribute[0]);
+    const mftData = await this.readAttributeData(dataAttribute[0]);
 
     return mftData;
   }
 
   async readDirectoryEntries() {
+    // Get the index root attribute.
     const indexAttributes = this.getAttributesByType(AttributeType.INDEX_ROOT);
 
+    // We only support 1 INDEX_ROOT right now so check for that.
     if (indexAttributes.length !== 1) {
       throw new Error('Only 1 INDEX_ROOT is supported.');
     }
 
+    const indexAttribute = indexAttributes[0];
+
     const indexRootData = BinaryReader.create(
-      await this.getAttributeData(indexAttributes[0])
+      await this.readAttributeData(indexAttribute)
     );
 
-    const indexRootHeader = await indexRootData.struct(async reader => ({
-      attributeType: reader.u32(),
-      collationType: reader.u32(),
-      indexEntrySize: reader.u32(),
-      indexEntryNumber: reader.u32(),
-    }));
+    // Read the index root header.
+    const indexRootHeader = await readIndexRootHeader(indexRootData);
 
-    // console.log(indexRootHeader);
+    console.log('indexRootHeader', indexRootHeader);
 
     const indexNodeHeaderStart = indexRootData.tell();
 
-    const indexNodeHeader = await indexRootData.struct(async reader => ({
-      indexValuesOffset: reader.u32(),
-      indexNodeSize: reader.u32(),
-      allocatedIndexNodeSize: reader.u32(),
-      indexNodeFlags: reader.u32(),
-    }));
+    // Read the index node header.
+    const indexNodeHeader = await readIndexNodeHeader(indexRootData);
 
-    // console.log(indexNodeHeader);
+    console.log('indexNodeHeader', indexNodeHeader);
+
+    // Seek to the start of values.
+    indexRootData.seek(
+      indexNodeHeaderStart + indexNodeHeader.indexValuesOffset
+    );
+
+    const indexRootValue = await readIndexValue(indexRootData);
+
+    console.log('indexRootValue', indexRootValue);
+
+    // Get a reference to the bitmap
+    const bitmaps = this.getAttributesByType(AttributeType.BITMAP);
+
+    // console.log('bitmaps', bitmaps);
+
+    // We also only support 1 bitmap.
+    if (bitmaps.length !== 1) {
+      throw new Error('Only 1 BITMAP is supported.');
+    }
+
+    const bitmap = bitmaps[0];
+
+    // Verify the name of the allocations match the index_root.
+    if (bitmap.name !== indexAttribute.name) {
+      throw new Error('Bitmap has a different name to the root.');
+    }
+
+    const bitmapData = toBitmap(await this.readAttributeData(bitmap));
+
+    console.log('bitmapData', bitmapData);
+
+    // Get a reference to the allocations.
+    const allocations = this.getAttributesByType(
+      AttributeType.INDEX_ALLOCATION
+    );
+
+    // We also only support 1 allocation.
+    if (allocations.length !== 1) {
+      throw new Error('Only 1 INDEX_ALLOCATION is supported.');
+    }
+
+    const allocation = allocations[0];
+
+    // Verify the name of the allocations match the index_root.
+    if (allocation.name !== indexAttribute.name) {
+      throw new Error('Allocation has a different name to the root.');
+    }
+
+    // console.log('INDEX_ALLOCATION', allocation);
+
+    // Read the allocations data.
+    const allocationData = BinaryReader.create(
+      await this.readAttributeData(allocation)
+    );
+
+    // Read the allocation index entry header.
+    const indexEntryHeader = await readIndexEntryHeader(allocationData);
+
+    console.log('indexEntryHeader', indexEntryHeader);
+
+    const indexEntryNodeHeaderStart = allocationData.tell();
+
+    // Read the allocation index entry node header.
+    const indexEntryNodeHeader = await readIndexNodeHeader(allocationData);
+
+    console.log('indexEntryNodeHeader', indexEntryNodeHeader);
+
+    // Seek to the start of values.
+    allocationData.seek(
+      indexEntryNodeHeaderStart + indexEntryNodeHeader.indexValuesOffset
+    );
+
+    const size = indexEntryNodeHeader.indexNodeSize;
+
+    console.log('indexEntryNodeHeader.indexNodeSize', size);
+
+    // Read all values from the cluster.
+    const start = allocationData.tell();
+
+    while (true) {
+      const startOffset = allocationData.tell();
+
+      // Once we read all the values exit the loop.
+      if (startOffset >= start + size) {
+        break;
+      }
+
+      const indexValue = await readIndexValue(allocationData);
+
+      console.log('indexValue', indexValue);
+
+      if (indexValue.indexKeyData !== undefined) {
+        // console.log('indexKeyData');
+        // console.log(hexDump(indexValue.indexKeyData));
+
+        const fileNameAttribute = await readFileNameAttribute(
+          BinaryReader.create(indexValue.indexKeyData)
+        );
+
+        console.log('fileNameAttribute', fileNameAttribute);
+      }
+
+      if (indexValue.indexValueSize > 0) {
+        allocationData.seek(startOffset + indexValue.indexValueSize);
+      }
+    }
   }
 
   private async readAttribute(
@@ -414,10 +592,20 @@ export class NTFSFileEntry {
           validDataSize: reader.u64(),
 
           totalAllocatedSize: undefined,
+
+          restOffset: undefined,
+          restData: undefined,
         }));
 
         if (values.nonResidentData.compressionUnitSize > 0) {
           values.nonResidentData.totalAllocatedSize = cluster.u64();
+        }
+
+        const restSize = values.recordLength - (cluster.tell() - offset);
+
+        if (restSize > 0) {
+          values.nonResidentData.restOffset = cluster.tell() - offset;
+          values.nonResidentData.restData = cluster.read(restSize);
         }
       }
 
@@ -429,13 +617,64 @@ export class NTFSFileEntry {
     return attribute;
   }
 
-  private async getAttributeData(attr: MFTAttribute): Promise<Buffer> {
-    if (attr.nonResidentData !== undefined) {
-      return this.owner.readClusters(
-        this.clusterNumber + attr.nonResidentData.firstVirtualClusterNumber,
-        attr.nonResidentData.lastVirtualClusterNumber -
-          attr.nonResidentData.firstVirtualClusterNumber
+  private async getDataRuns(attr: MFTAttribute) {
+    const nonResidentData = attr.nonResidentData!;
+
+    const restOffset = nonResidentData.restOffset!;
+
+    if (nonResidentData.dataRunsOffset < restOffset) {
+      console.log(restOffset, nonResidentData.dataRunsOffset);
+
+      throw new Error('Can not find data runs in remainder information.');
+    }
+
+    const dataRunsOffsetInRest = nonResidentData.dataRunsOffset - restOffset;
+
+    const dataRunsData = nonResidentData.restData!.slice(dataRunsOffsetInRest);
+
+    const reader = BinaryReader.create(dataRunsData);
+
+    const dataRuns: DataRun[] = [];
+
+    while (true) {
+      const sizePair = reader.u8();
+
+      if (sizePair === 0) {
+        break;
+      }
+
+      const numberOfClusterBlocksValueSize = sizePair & 0b1111;
+      const clusterBlockNumberValueSize = (sizePair & 0b11110000) >> 4;
+
+      const numberOfClusterBlocks = reader.varUInt(
+        numberOfClusterBlocksValueSize
       );
+      const clusterBlockNumber = reader.varUInt(clusterBlockNumberValueSize);
+
+      dataRuns.push({ numberOfClusterBlocks, clusterBlockNumber });
+    }
+
+    return dataRuns;
+  }
+
+  private async readAttributeData(attr: MFTAttribute): Promise<Buffer> {
+    if (attr.nonResidentData !== undefined) {
+      const nonResidentData = attr.nonResidentData;
+
+      const runs = await this.getDataRuns(attr);
+
+      const allClusters: Buffer[] = [];
+
+      for (const run of runs) {
+        const clusters = await this.owner.readClusters(
+          run.clusterBlockNumber,
+          run.numberOfClusterBlocks
+        );
+
+        allClusters.push(clusters);
+      }
+
+      return Buffer.concat(allClusters);
     } else if (attr.residentData !== undefined) {
       return this.cluster.seekTemp(
         attr.offset + attr.residentData.dataOffset,
@@ -486,6 +725,7 @@ export class NTFS {
 
       if (fileName === '.') {
         this.rootEntry = file;
+
         return file;
       }
     }

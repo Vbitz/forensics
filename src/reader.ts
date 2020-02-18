@@ -22,6 +22,10 @@ export class BinaryReader {
 
   seek(offset: number) {
     this.currentOffset = offset;
+
+    if (this.currentOffset > this.buffer.length) {
+      throw new Error('Seek to outside buffer');
+    }
   }
 
   async seekTemp<T>(
@@ -169,8 +173,28 @@ export class BinaryReader {
     }
   }
 
+  varUInt(size: number): number {
+    if (size === 1) {
+      return this.u8();
+    } else if (size === 2) {
+      return this.u16();
+    } else if (size === 4) {
+      return this.u32();
+    } else if (size === 8) {
+      return this.u64();
+    } else {
+      throw new Error('Not Implemented');
+    }
+  }
+
   struct<T>(cb: (reader: BinaryReader) => Promise<T>): Promise<T> {
     return cb(this);
+  }
+
+  static makeStructure<T>(
+    cb: (reader: BinaryReader) => Promise<T>
+  ): (reader: BinaryReader) => Promise<T> {
+    return reader => reader.struct(cb);
   }
 
   async inflate(size?: number): Promise<Buffer> {
