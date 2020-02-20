@@ -75,6 +75,7 @@ export class VMWareDiskFile extends File {
     const grainTableEntry = await this.getGrainTableEntryForSector(sector);
 
     if (grainTableEntry === 0) {
+      console.log('[VMDK] Reading unallocated sector sector=', sector);
       return Buffer.alloc(this.sectorSize);
     }
 

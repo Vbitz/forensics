@@ -79,13 +79,13 @@ interface DataRun {
   clusterBlockNumber: number;
 }
 
-interface FileReference {
+export interface FileReference {
   mftEntryIndex: number;
   padding: number;
   sequenceNumber: number;
 }
 
-interface IndexValue {
+export interface IndexValue {
   fileReference: FileReference;
   indexValueSize: number;
   indexKeyDataSize: number;
@@ -395,6 +395,8 @@ export class NTFSFileEntry {
   }
 
   async readDirectoryEntries() {
+    const values: IndexValue[] = [];
+
     // Get the index root attribute.
     const indexAttributes = this.getAttributesByType(AttributeType.INDEX_ROOT);
 
@@ -412,14 +414,14 @@ export class NTFSFileEntry {
     // Read the index root header.
     const indexRootHeader = await readIndexRootHeader(indexRootData);
 
-    console.log('indexRootHeader', indexRootHeader);
+    // console.log('indexRootHeader', indexRootHeader);
 
     const indexNodeHeaderStart = indexRootData.tell();
 
     // Read the index node header.
     const indexNodeHeader = await readIndexNodeHeader(indexRootData);
 
-    console.log('indexNodeHeader', indexNodeHeader);
+    // console.log('indexNodeHeader', indexNodeHeader);
 
     // Seek to the start of values.
     indexRootData.seek(
@@ -428,7 +430,9 @@ export class NTFSFileEntry {
 
     const indexRootValue = await readIndexValue(indexRootData);
 
-    console.log('indexRootValue', indexRootValue);
+    values.push(indexRootValue);
+
+    // console.log('indexRootValue', indexRootValue);
 
     // Get a reference to the bitmap
     const bitmaps = this.getAttributesByType(AttributeType.BITMAP);
@@ -449,7 +453,7 @@ export class NTFSFileEntry {
 
     const bitmapData = toBitmap(await this.readAttributeData(bitmap));
 
-    console.log('bitmapData', bitmapData);
+    // console.log('bitmapData', bitmapData);
 
     // Get a reference to the allocations.
     const allocations = this.getAttributesByType(
@@ -478,14 +482,14 @@ export class NTFSFileEntry {
     // Read the allocation index entry header.
     const indexEntryHeader = await readIndexEntryHeader(allocationData);
 
-    console.log('indexEntryHeader', indexEntryHeader);
+    // console.log('indexEntryHeader', indexEntryHeader);
 
     const indexEntryNodeHeaderStart = allocationData.tell();
 
     // Read the allocation index entry node header.
     const indexEntryNodeHeader = await readIndexNodeHeader(allocationData);
 
-    console.log('indexEntryNodeHeader', indexEntryNodeHeader);
+    // console.log('indexEntryNodeHeader', indexEntryNodeHeader);
 
     // Seek to the start of values.
     allocationData.seek(
@@ -494,7 +498,7 @@ export class NTFSFileEntry {
 
     const size = indexEntryNodeHeader.indexNodeSize;
 
-    console.log('indexEntryNodeHeader.indexNodeSize', size);
+    // console.log('indexEntryNodeHeader.indexNodeSize', size);
 
     // Read all values from the cluster.
     const start = allocationData.tell();
@@ -509,23 +513,29 @@ export class NTFSFileEntry {
 
       const indexValue = await readIndexValue(allocationData);
 
-      console.log('indexValue', indexValue);
+      // console.log('indexValue', indexValue);
 
-      if (indexValue.indexKeyData !== undefined) {
-        // console.log('indexKeyData');
-        // console.log(hexDump(indexValue.indexKeyData));
-
-        const fileNameAttribute = await readFileNameAttribute(
-          BinaryReader.create(indexValue.indexKeyData)
-        );
-
-        console.log('fileNameAttribute', fileNameAttribute);
+      if (indexValue.indexValueSize !== 0) {
+        values.push(indexValue);
       }
+
+      // if (indexValue.indexKeyData !== undefined) {
+      //   // console.log('indexKeyData');
+      //   // console.log(hexDump(indexValue.indexKeyData));
+
+      //   const fileNameAttribute = await readFileNameAttribute(
+      //     BinaryReader.create(indexValue.indexKeyData)
+      //   );
+
+      //   console.log('fileNameAttribute', fileNameAttribute);
+      // }
 
       if (indexValue.indexValueSize > 0) {
         allocationData.seek(startOffset + indexValue.indexValueSize);
       }
     }
+
+    return values;
   }
 
   private async readAttribute(
@@ -636,6 +646,8 @@ export class NTFSFileEntry {
 
     const dataRuns: DataRun[] = [];
 
+    let lastOffset = 0;
+
     while (true) {
       const sizePair = reader.u8();
 
@@ -646,12 +658,19 @@ export class NTFSFileEntry {
       const numberOfClusterBlocksValueSize = sizePair & 0b1111;
       const clusterBlockNumberValueSize = (sizePair & 0b11110000) >> 4;
 
+      // console.log(numberOfClusterBlocksValueSize, clusterBlockNumberValueSize);
+
       const numberOfClusterBlocks = reader.varUInt(
         numberOfClusterBlocksValueSize
       );
-      const clusterBlockNumber = reader.varUInt(clusterBlockNumberValueSize);
+      const clusterBlockNumber = reader.varInt(clusterBlockNumberValueSize);
 
-      dataRuns.push({ numberOfClusterBlocks, clusterBlockNumber });
+      dataRuns.push({
+        numberOfClusterBlocks,
+        clusterBlockNumber: lastOffset + clusterBlockNumber,
+      });
+
+      lastOffset += clusterBlockNumber;
     }
 
     return dataRuns;
@@ -661,11 +680,19 @@ export class NTFSFileEntry {
     if (attr.nonResidentData !== undefined) {
       const nonResidentData = attr.nonResidentData;
 
+      if (nonResidentData.compressionUnitSize !== 0) {
+        throw new Error('Compressed non-resident attributes are not supported');
+      }
+
       const runs = await this.getDataRuns(attr);
 
       const allClusters: Buffer[] = [];
 
+      // console.log(attr.nonResidentData);
+
       for (const run of runs) {
+        // console.log(run);
+
         const clusters = await this.owner.readClusters(
           run.clusterBlockNumber,
           run.numberOfClusterBlocks
@@ -811,6 +838,34 @@ export class NTFS {
     } else {
       return this.file.readAbsolute(index * clusterSize, clusterSize * count);
     }
+  }
+
+  async getIndexFilename(entry: IndexValue): Promise<string | undefined> {
+    if (entry.indexKeyData === undefined) {
+      return undefined;
+    }
+
+    const fileNameAttribute = await readFileNameAttribute(
+      BinaryReader.create(entry.indexKeyData!)
+    );
+
+    return fileNameAttribute.nameString;
+  }
+
+  async getFileByReference(ref: FileReference): Promise<NTFSFileEntry> {
+    return this.getMFTEntryByIndex(ref.mftEntryIndex);
+  }
+
+  private async getMFTEntryByIndex(index: number): Promise<NTFSFileEntry> {
+    const file = await this.mft.open();
+
+    const offset = index * 1024;
+
+    file.seek(offset);
+
+    const entry = BinaryReader.create(await file.read(1024));
+
+    return NTFSFileEntry.create(this, index, this.mft.clusterNumber, entry);
   }
 
   private async readMFT(mftBaseCluster: number, mftData: File) {

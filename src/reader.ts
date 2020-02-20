@@ -57,7 +57,7 @@ export class BinaryReader {
 
     if (magic !== str) {
       console.error('Bad Magic', 'real', { magic }, 'expected', { str });
-      throw new Error('Bad File Magic');
+      throw new Error('Bad Magic Number');
     }
 
     return magic;
@@ -152,10 +152,30 @@ export class BinaryReader {
     return ret;
   }
 
+  s16() {
+    const ret = this.bigEndian
+      ? this.buffer.readInt16BE(this.currentOffset)
+      : this.buffer.readInt16LE(this.currentOffset);
+
+    this.currentOffset += 2;
+
+    return ret;
+  }
+
   u32() {
     const ret = this.bigEndian
       ? this.buffer.readUInt32BE(this.currentOffset)
       : this.buffer.readUInt32LE(this.currentOffset);
+
+    this.currentOffset += 4;
+
+    return ret;
+  }
+
+  s32() {
+    const ret = this.bigEndian
+      ? this.buffer.readInt32BE(this.currentOffset)
+      : this.buffer.readInt32LE(this.currentOffset);
 
     this.currentOffset += 4;
 
@@ -178,12 +198,36 @@ export class BinaryReader {
       return this.u8();
     } else if (size === 2) {
       return this.u16();
+    } else if (size === 3) {
+      if (this.bigEndian) {
+        return Buffer.concat([new Uint8Array(1), this.read(3)]).readUInt32BE(0);
+      } else {
+        return Buffer.concat([this.read(3), new Uint8Array(1)]).readUInt32LE(0);
+      }
     } else if (size === 4) {
       return this.u32();
     } else if (size === 8) {
       return this.u64();
     } else {
-      throw new Error('Not Implemented');
+      throw new Error('Not Implemented: ' + size);
+    }
+  }
+
+  varInt(size: number): number {
+    if (size === 1) {
+      return this.s8();
+    } else if (size === 2) {
+      return this.s16();
+    } else if (size === 3) {
+      if (this.bigEndian) {
+        return Buffer.concat([new Uint8Array(1), this.read(3)]).readInt32BE(0);
+      } else {
+        return Buffer.concat([this.read(3), new Uint8Array(1)]).readInt32LE(0);
+      }
+    } else if (size === 4) {
+      return this.s32();
+    } else {
+      throw new Error('Not Implemented: ' + size);
     }
   }
 

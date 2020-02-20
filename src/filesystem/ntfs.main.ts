@@ -31,7 +31,21 @@ registryEntryPoint('ntfs', async args => {
 
   console.log(root.getAttributeNames());
 
-  console.log(await root.readDirectoryEntries());
+  for (const entry of await root.readDirectoryEntries()) {
+    const filename = await ntfs.getIndexFilename(entry);
+
+    console.log(new Date(), 'Entry', filename);
+
+    const mftEntry = await ntfs.getFileByReference(entry.fileReference);
+
+    if (filename === 'Windows') {
+      for (const windowsEntry of await mftEntry.readDirectoryEntries()) {
+        const filename = await ntfs.getIndexFilename(windowsEntry);
+
+        console.log(new Date(), 'Windows Entry', filename);
+      }
+    }
+  }
 
   console.log(new Date(), 'Finished');
 
