@@ -4,7 +4,8 @@
     "rootDir": ".",
     "outDir": "build",
     "target": "ESNext",
-    "lib": ["ESNext", "DOM"]
+    "lib": ["ESNext", "DOM"],
+    "incremental": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }
