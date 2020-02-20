@@ -246,7 +246,9 @@ const readIndexValue = BinaryReader.makeStructure(async reader => {
     value.subNodeVCN = reader.u64();
   }
 
-  return value;
+  const last = (value.indexValueFlags & 0x00000002) > 0;
+
+  return { value, last };
 });
 
 export class NTFSFileEntry {
@@ -428,7 +430,7 @@ export class NTFSFileEntry {
       indexNodeHeaderStart + indexNodeHeader.indexValuesOffset
     );
 
-    const indexRootValue = await readIndexValue(indexRootData);
+    const { value: indexRootValue } = await readIndexValue(indexRootData);
 
     values.push(indexRootValue);
 
@@ -498,20 +500,17 @@ export class NTFSFileEntry {
 
     const size = indexEntryNodeHeader.indexNodeSize;
 
-    // console.log('indexEntryNodeHeader.indexNodeSize', size);
+    // console.log(
+    //   'indexEntryNodeHeader.indexNodeSize',
+    //   size,
+    //   allocationData.length
+    // );
 
-    // Read all values from the cluster.
-    const start = allocationData.tell();
-
+    // Read all values from the cluster.\
     while (true) {
       const startOffset = allocationData.tell();
 
-      // Once we read all the values exit the loop.
-      if (startOffset >= start + size) {
-        break;
-      }
-
-      const indexValue = await readIndexValue(allocationData);
+      const { value: indexValue, last } = await readIndexValue(allocationData);
 
       // console.log('indexValue', indexValue);
 
@@ -532,6 +531,10 @@ export class NTFSFileEntry {
 
       if (indexValue.indexValueSize > 0) {
         allocationData.seek(startOffset + indexValue.indexValueSize);
+      }
+
+      if (last) {
+        break;
       }
     }
 

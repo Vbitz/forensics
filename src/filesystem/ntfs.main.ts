@@ -39,6 +39,8 @@ registryEntryPoint('ntfs', async args => {
     const mftEntry = await ntfs.getFileByReference(entry.fileReference);
 
     if (filename === 'Windows') {
+      console.log('Windows Attributes', mftEntry.getAttributeNames());
+
       for (const windowsEntry of await mftEntry.readDirectoryEntries()) {
         const filename = await ntfs.getIndexFilename(windowsEntry);
 
