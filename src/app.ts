@@ -1,7 +1,7 @@
 // import 'source-map-support/register';
 
 import { VMWareDiskFile } from './container/vmdk';
-import { NTFS } from './filesystem/ntfs';
+import { NTFS, NTFSFileEntry } from './filesystem/ntfs';
 import { MasterBootRecord } from './container/mbr';
 import { BlobFile } from './file.browser';
 import { expect } from './common';
@@ -9,10 +9,12 @@ import { expect } from './common';
 export class WebApplication {
   private filesystem: HTMLInputElement;
   private openFileButton: HTMLButtonElement;
+  private rootContainer: HTMLDivElement;
 
   constructor() {
     this.filesystem = document.querySelector('#filesystem') || expect('');
     this.openFileButton = document.querySelector('#openFile') || expect('');
+    this.rootContainer = document.querySelector('#rootContainer') || expect('');
 
     this.openFileButton.addEventListener('click', () => {
       const files = this.filesystem.files;
@@ -45,9 +47,49 @@ export class WebApplication {
 
     const root = await ntfs.getRootEntry();
 
-    console.log('Root Attribute Names', root.getAttributeNames());
+    await this.displayDirectory(ntfs, this.rootContainer, root);
+  }
 
-    console.log('Root Directory Entry', await root.readDirectoryEntries());
+  async displayDirectory(
+    ntfs: NTFS,
+    container: HTMLDivElement,
+    fileEntry: NTFSFileEntry
+  ) {
+    const entries = await fileEntry.readDirectoryEntries();
+
+    const folderDiv = document.createElement('div');
+
+    folderDiv.classList.add('folder');
+
+    for (const ent of entries) {
+      const element = document.createElement('div');
+
+      element.classList.add('entry');
+
+      const detail = document.createElement('pre');
+
+      const filename = await ntfs.getIndexFilename(ent);
+
+      detail.textContent = `EntryIndex [${ent.fileReference.mftEntryIndex}:${ent.fileReference.sequenceNumber}] FileName [${filename}]`;
+
+      element.appendChild(detail);
+
+      const expandButton = document.createElement('button');
+
+      expandButton.addEventListener('click', async () => {
+        const entry = await ntfs.getFileByReference(ent.fileReference);
+
+        await this.displayDirectory(ntfs, element, entry);
+      });
+
+      expandButton.textContent = 'Expand';
+
+      element.appendChild(expandButton);
+
+      folderDiv.appendChild(element);
+    }
+
+    container.appendChild(folderDiv);
   }
 }
 

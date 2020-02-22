@@ -4,11 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document</title>
+
+    <style>
+      .folder {
+        border: 1px solid black;
+        padding: 10px;
+        margin: 10px;
+      }
+
+      .entry {
+        border: 1px solid black;
+        padding: 5px;
+      }
+    </style>
   </head>
   <body>
-    <label for="filesystem">File (*.vmdk):</label>
-    <input type="file" name="filesystem" id="filesystem" />
-    <button id="openFile">Open</button>
+    <div class="controls">
+      <h2>Controls</h2>
+      <label for="filesystem">File (*.vmdk):</label>
+      <input type="file" name="filesystem" id="filesystem" />
+      <button id="openFile">Open</button>
+    </div>
+
+    <div class="container">
+      <h2>Files</h2>
+      <div id="rootContainer"></div>
+    </div>
 
     <script src="./app.ts"></script>
   </body>
