@@ -79,3 +79,7 @@ export function hexDump(buff: Buffer): string {
 
   return ret;
 }
+
+export function stripZeros(s: string): string {
+  return s.replace(/\0/g, '');
+}

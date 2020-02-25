@@ -3,6 +3,7 @@ import 'source-map-support/register';
 // import './container/ewfFile';
 // import './container/mbr';
 // import './container/qcow2';
+import './container/tar.main';
 import './container/vmdk.main';
 
 import './filesystem/ntfs.main';
