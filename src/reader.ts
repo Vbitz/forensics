@@ -219,10 +219,15 @@ export class BinaryReader {
     } else if (size === 2) {
       return this.s16();
     } else if (size === 3) {
+      const otherData = this.read(3);
       if (this.bigEndian) {
-        return Buffer.concat([new Uint8Array(1), this.read(3)]).readInt32BE(0);
+        return Buffer.from(Uint8Array.from([0x00, ...otherData])).readInt32BE(
+          0
+        );
       } else {
-        return Buffer.concat([this.read(3), new Uint8Array(1)]).readInt32LE(0);
+        return Buffer.from(Uint8Array.from([...otherData, 0x00])).readInt32LE(
+          0
+        );
       }
     } else if (size === 4) {
       return this.s32();

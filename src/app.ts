@@ -43,7 +43,7 @@ export class WebApplication {
     const mbr = await MasterBootRecord.open(vmdk);
 
     console.log('Opening NTFS for root partition');
-    const ntfs = await NTFS.open(mbr.partitions[0]);
+    const ntfs = await NTFS.open(mbr.partitions[1]);
 
     const root = await ntfs.getRootEntry();
 
@@ -77,9 +77,13 @@ export class WebApplication {
       const expandButton = document.createElement('button');
 
       expandButton.addEventListener('click', async () => {
-        const entry = await ntfs.getFileByReference(ent.fileReference);
+        try {
+          const entry = await ntfs.getFileByReference(ent.fileReference);
 
-        await this.displayDirectory(ntfs, element, entry);
+          await this.displayDirectory(ntfs, element, entry);
+        } catch (ex) {
+          alert(ex);
+        }
       });
 
       expandButton.textContent = 'Expand';

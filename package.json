@@ -6,7 +6,9 @@
     "gts": "^1.1.2",
     "typescript": "~3.7.0"
   },
-  "browserslist": ["last 1 Chrome version"],
+  "browserslist": [
+    "last 1 Chrome version"
+  ],
   "scripts": {
     "web": "parcel src/index.html",
     "start": "yarn run compile && node build/src",

@@ -1,0 +1,186 @@
+// From: https://wiki.osdev.org/ISO_9660
+
+import { registryEntryPoint } from '../entryPoint';
+import { DiskFile, File } from '../file';
+import { BinaryReader } from '../reader';
+import { assert, swapEndian32 } from '../common';
+
+function int16_LSB_MSB(reader: BinaryReader) {
+  const ret = reader.u16();
+
+  reader.skip(2);
+
+  return ret;
+}
+
+function int32_LSB(reader: BinaryReader) {
+  return reader.u32();
+}
+
+function int32_MSB(reader: BinaryReader) {
+  return Number(swapEndian32(BigInt(reader.u32())));
+}
+
+function int32_LSB_MSB(reader: BinaryReader) {
+  const ret = reader.u32();
+
+  reader.skip(4);
+
+  return ret;
+}
+
+interface DirectoryEntry {
+  length: number;
+  extendedAttributeRecordLength: number;
+  locationOfExtent: number;
+  dataLength: number;
+  recordingDateTime: Buffer;
+  fileFlags: number;
+  fileUnitSize: number;
+  interleaveGapSize: number;
+  volumeSequenceNumber: number;
+  fileNameLength: number;
+  fileName: string;
+}
+
+export class ISO9660 {
+  private constructor(private file: File) {}
+
+  static async open(file: File) {
+    const udf = new ISO9660(file);
+
+    await udf.parse();
+
+    return udf;
+  }
+
+  private async readDirectoryEntry(
+    reader: BinaryReader
+  ): Promise<DirectoryEntry> {
+    let fileNameLength = 0;
+
+    return reader.struct(async reader => ({
+      length: reader.u8(),
+      extendedAttributeRecordLength: reader.u8(),
+      locationOfExtent: int32_LSB_MSB(reader),
+      dataLength: int32_LSB_MSB(reader),
+      recordingDateTime: reader.read(7),
+      fileFlags: reader.u8(),
+      fileUnitSize: reader.u8(),
+      interleaveGapSize: reader.u8(),
+      volumeSequenceNumber: int16_LSB_MSB(reader),
+      fileNameLength: fileNameLength = reader.u8(),
+      fileName: reader.ascii(fileNameLength).replace(/\0/g, ''),
+    }));
+  }
+
+  private async readEntireDirectory(entry: DirectoryEntry): Promise<Buffer> {
+    return this.file.readAbsolute(
+      entry.locationOfExtent * 2048,
+      entry.dataLength
+    );
+  }
+
+  private async parse() {
+    this.file.skip(32 * 1024);
+
+    const firstSector = BinaryReader.create(await this.file.read(2048));
+
+    const volumeStructureDescriptor = await firstSector.struct(
+      async reader => ({
+        structureType: assert(reader.u8(), 1),
+        structureIdentifer: assert(reader.ascii(5), 'CD001'),
+        structureVersion: assert(reader.u8(), 1),
+
+        unused1: assert(reader.u8(), 0x00),
+
+        systemIdentifier: reader.ascii(32).trim(),
+        volumeIdentifier: reader.ascii(32).trim(),
+
+        unused2: reader.read(8),
+
+        volumeSpaceSizeLE: int32_LSB_MSB(reader),
+
+        unused3: reader.read(32),
+
+        volumeSetSize: int16_LSB_MSB(reader),
+        volumeSequenceNumber: int16_LSB_MSB(reader),
+
+        logicalBlockSize: int16_LSB_MSB(reader),
+
+        pathTableSize: int32_LSB_MSB(reader),
+
+        locationPfTypeLPathTable: int32_LSB(reader),
+        locationOfTheOptionalTypeLPathTable: int32_LSB(reader),
+
+        locationOfTypeMPathTable: int32_MSB(reader),
+        locationOfOptionalTypeMPathTable: int32_MSB(reader),
+
+        rootDirectoryEntry: await this.readDirectoryEntry(
+          BinaryReader.create(reader.read(34))
+        ),
+
+        volumeSetIdentifier: reader.ascii(128).trim(),
+        publisherIdentifier: reader.ascii(128).trim(),
+        dataPreparerIdentifier: reader.ascii(128).trim(),
+        applicationIdentifier: reader.ascii(128).trim(),
+
+        copyrightFileIdentifier: reader.ascii(38).trim(),
+        abstractFileIdentifier: reader.ascii(36).trim(),
+        bibliographicFileIdentifier: reader.ascii(37).trim(),
+
+        volumeCreationDateTime: [reader.ascii(16), reader.u8()],
+        volumeModificationDateTime: [reader.ascii(16), reader.u8()],
+        volumeExpirationDateTime: [reader.ascii(16), reader.u8()],
+        volumeEffectiveDateTime: [reader.ascii(16), reader.u8()],
+
+        fileStructureVersion: assert(reader.u8(), 0x01),
+
+        unused4: reader.u8(),
+
+        applicationSpace: reader.read(512),
+        reserved: reader.read(653),
+      })
+    );
+
+    console.log(volumeStructureDescriptor);
+
+    const rootDirectory = BinaryReader.create(
+      await this.readEntireDirectory(
+        volumeStructureDescriptor.rootDirectoryEntry
+      )
+    );
+
+    const files: DirectoryEntry[] = [];
+
+    for (let i = 0; i < 10; i++) {
+      const start = rootDirectory.tell();
+
+      if (start === rootDirectory.buffer.length) {
+        break;
+      }
+
+      const directoryEntry = await this.readDirectoryEntry(rootDirectory);
+
+      rootDirectory.seek(start + directoryEntry.length);
+
+      files.push(directoryEntry);
+    }
+
+    const readmeFile = files[2];
+
+    const readmeContent = await this.readEntireDirectory(readmeFile);
+
+    console.log(readmeContent.toString('utf8'));
+  }
+}
+
+registryEntryPoint('iso9600', async args => {
+  const [fileName, ...rest] = args;
+
+  const file = await DiskFile.open(fileName);
+
+  const udf = await ISO9660.open(file);
+
+  return 0;
+});
